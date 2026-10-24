@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Schwung Cam</string>
+    <string name="record">Record</string>
+    <string name="stop">Stop</string>
+    <string name="camera">Camera</string>
+    <string name="exposure_lock">Exposure lock</string>
+    <string name="screen_overlay">Move screen</string>
+    <string name="transparent">Transparent pixels</string>
+    <string name="opacity">Screen opacity</string>
+    <string name="settings">Settings</string>
+    <string name="host">Move host</string>
+    <string name="resolution">Resolution</string>
+    <string name="master">Master audio</string>
+    <string name="glue">Glue compressor</string>
+    <string name="target">Loudness target</string>
+    <string name="keep_wav">Keep raw WAV (Music/SchwungCam)</string>
+</resources>
