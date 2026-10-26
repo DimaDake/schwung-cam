@@ -27,7 +27,8 @@ class RenderThread(private val onCameraTexture: (SurfaceTexture) -> Unit) {
     private var encoder: EGLSurface? = null
     private var encW = 0; private var encH = 0
     private var outAspect = 16f / 9f
-    private var camW = 0; private var camH = 0; private var camRot = 0
+    private var camW = 0; private var camH = 0; private var camSensor = 0; private var camUnmirror = false
+    private var displayDeg = 90
 
     @Volatile var overlay = Overlay()
     @Volatile var onFrameDrawn: ((Long) -> Unit)? = null
@@ -49,13 +50,20 @@ class RenderThread(private val onCameraTexture: (SurfaceTexture) -> Unit) {
 
     fun setOutput(w: Int, h: Int) = handler.post {
         outAspect = w.toFloat() / h
-        if (camW > 0) comp.setCameraGeometry(camW, camH, camRot, outAspect)
+        applyGeometry()
     }
 
-    fun setCamera(bufW: Int, bufH: Int, rotationDeg: Int) = handler.post {
-        camW = bufW; camH = bufH; camRot = rotationDeg
+    fun setCamera(bufW: Int, bufH: Int, sensorDeg: Int, unmirror: Boolean) = handler.post {
+        camW = bufW; camH = bufH; camSensor = sensorDeg; camUnmirror = unmirror
         camTex.setDefaultBufferSize(bufW, bufH)
-        comp.setCameraGeometry(bufW, bufH, rotationDeg, outAspect)
+        applyGeometry()
+    }
+
+    /** Surface.ROTATION_* in degrees; the picture stays upright whichever way the phone is held. */
+    fun setDisplayRotation(deg: Int) = handler.post { displayDeg = deg; applyGeometry() }
+
+    private fun applyGeometry() {
+        if (camW > 0) comp.setCameraGeometry(camW, camH, camSensor, displayDeg, camUnmirror, outAspect)
     }
 
     fun setPreview(surface: Surface?, w: Int, h: Int) = handler.post {

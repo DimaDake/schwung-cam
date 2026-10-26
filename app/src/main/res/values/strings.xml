@@ -9,6 +9,7 @@
     <string name="transparent">Transparent pixels</string>
     <string name="opacity">Screen opacity</string>
     <string name="settings">Settings</string>
+    <string name="last_take">Open the last take</string>
     <string name="host">Move host</string>
     <string name="resolution">Resolution</string>
     <string name="master">Master audio</string>

@@ -10,6 +10,7 @@ import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
@@ -33,14 +34,15 @@ class CameraController(private val cm: CameraManager) {
     @Volatile var clockNs: () -> Long = { SystemClock.elapsedRealtimeNanos() }
         private set
 
-    class Opened(val bufSize: Size, val rotationDeg: Int)
+    /** [unmirror]: the stream is mirrored (a front lens before API 33) and the compositor must undo it. */
+    class Opened(val bufSize: Size, val sensorDeg: Int, val unmirror: Boolean)
 
     /**
-     * Opens [choice]. [onReady] gets the buffer size and rotation before the
+     * Opens [choice]. [onReady] gets the buffer size and orientation before the
      * session starts, so the texture can be sized first.
      */
     @SuppressLint("MissingPermission")
-    fun open(choice: CameraChoice, tex: SurfaceTexture, outW: Int, outH: Int, displayDeg: Int, onReady: (Opened) -> Unit, onError: (String) -> Unit) {
+    fun open(choice: CameraChoice, tex: SurfaceTexture, outW: Int, outH: Int, onReady: (Opened) -> Unit, onError: (String) -> Unit) {
         handler.post {
             closeNow()
             val ch = cm.getCameraCharacteristics(choice.id)
@@ -54,18 +56,28 @@ class CameraController(private val cm: CameraManager) {
             val size = CameraCatalog.bufferSize(lensCh, outW, outH)
             val sensor = lensCh.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
             val front = lensCh.get(CameraCharacteristics.LENS_FACING) == CameraMetadata.LENS_FACING_FRONT
-            val rot = if (front) (sensor + displayDeg) % 360 else (sensor - displayDeg + 360) % 360
+            // the video is never mirrored: preview and file must show the same picture
+            val canSkipMirror = Build.VERSION.SDK_INT >= 33
             val fps = ch.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
                 ?.filter { it.upper == 30 }?.maxByOrNull { it.lower } ?: Range(30, 30)
-            onReady(Opened(size, rot))
+            onReady(Opened(size, sensor, front && !canSkipMirror))
             tex.setDefaultBufferSize(size.width, size.height)
             val surface = Surface(tex)
             try {
                 cm.openCamera(choice.id, executor, object : CameraDevice.StateCallback() {
                     override fun onOpened(d: CameraDevice) {
                         device = d
+                        // the camera can be taken away mid-setup (screen locked, app paused); that is a
+                        // closed camera, not a crash, and the next onResume opens it again
+                        try { configure(d) } catch (e: Exception) {
+                            Log.w("SchwungCam", "configure", e)
+                            d.close(); if (device === d) device = null
+                        }
+                    }
+                    private fun configure(d: CameraDevice) {
                         val oc = OutputConfiguration(surface)
                         choice.physicalId?.let { oc.setPhysicalCameraId(it) }
+                        if (front && canSkipMirror) oc.mirrorMode = OutputConfiguration.MIRROR_MODE_NONE
                         val rb = d.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
                             addTarget(surface)
                             // a fixed rate: auto-exposure may not stretch frames in low light

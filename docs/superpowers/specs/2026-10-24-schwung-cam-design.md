@@ -86,15 +86,21 @@ Each entry is labelled by facing and 35 mm-equivalent focal length
 - **Exposure lock** sets `CONTROL_AE_LOCK` and `CONTROL_AWB_LOCK` together.
 - Output 720p / 1080p (default) / 2160p, whichever are 16:9 and supported. The
   camera stream is center-cropped to 16:9 in the shader.
-- The activity is locked to landscape. Frames are rotated by the sensor
-  orientation and never mirrored, so preview and file agree.
+- The activity follows both landscape directions and locks the current one
+  while recording. Camera2 already gives the stream a transform for the
+  sensor orientation, and the `SurfaceTexture` matrix includes it, so the
+  image is upright in the phone's natural orientation and only the display
+  rotation is applied on top (`CameraUv`). *Changed in implementation:*
+  rotating by the sensor orientation as well turned the video 90° on a
+  Pixel 9. Front lenses are never mirrored (`MIRROR_MODE_NONE` from API 33;
+  below that the compositor undoes the mirror), so preview and file agree.
 
 ## Compositor (OpenGL ES 2)
 
 One render thread, one EGL context. The camera feeds a `SurfaceTexture`
 (OES). On each camera frame:
 
-1. Draw the camera quad (crop + rotation + `SurfaceTexture` matrix).
+1. Draw the camera quad (crop + display rotation + `SurfaceTexture` matrix).
 2. Draw the screen quad if the overlay is on: a 128×64 luminance texture
    sampled `GL_NEAREST`.
 3. Render into the preview surface (letterboxed 16:9) and, while recording,
@@ -157,7 +163,10 @@ lives in normalised frame coordinates, so the preview is exactly the file.
    shown. "Keep raw WAV" keeps the unmastered WAV next to it; otherwise all
    temporary files are deleted.
 
-The result dialog offers Share (the YouTube app is one target).
+After a take, a thumbnail of it appears next to Record, as in a phone's
+own camera app, and opens it in the gallery app (where Share is). On start the
+thumbnail shows the newest take in `Movies/SchwungCam`. A short toast confirms
+the save; only a warning gets a dialog.
 
 ## UI
 
@@ -165,7 +174,7 @@ A single landscape activity:
 
 - Full-screen preview with the overlay drawn on top; drag and pinch edit it
   while the overlay is on.
-- Right rail: record button with timer; camera picker; Exposure lock; Overlay
+- Right rail: last-take thumbnail and record button, with timer; camera picker; Exposure lock; Overlay
   on/off; Key mode; Opacity.
 - Status line: stream state (offline / screen only / live), measured transit,
   and the pcm gap count during the take.
@@ -187,6 +196,7 @@ dependencies. Cleartext HTTP is allowed (the Move speaks plain http).
 | `PcmTake` | pre-roll + gap fill + backwards stop | gaps, reorder, pre-roll |
 | `Timeline` | video PTS → audio clock, trim range | drift mapping |
 | `OverlayGeometry` | drag/pinch/clamp → quad | clamping, aspect |
+| `CameraUv` | crop + display rotation before the ST matrix | full 16:9 buffer in both landscapes, half turn apart, unmirror |
 | `LoudnessMeter` | BS.1770-4 integrated LUFS | EBU Tech 3341 cases 1, 2, 5-ish (gating) |
 | `TruePeak` / `Limiter` | 8× TP, lookahead limiting | no peak > −1 dBTP under a 16× reference interpolator |
 | `Mastering` | chain + iteration | synthetic take → −14 ±0.5 LUFS, ≤ −1 dBTP; 60 s in < 15 s |

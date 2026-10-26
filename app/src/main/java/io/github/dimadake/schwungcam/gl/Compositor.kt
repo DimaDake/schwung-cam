@@ -41,26 +41,8 @@ class Compositor {
             GLES20.GL_LUMINANCE, GLES20.GL_UNSIGNED_BYTE, lumBuf)
     }
 
-    /**
-     * Camera texture coordinates for the output quad: center-crop the upright
-     * buffer to [outAspect], then rotate by the sensor orientation; the
-     * SurfaceTexture matrix is applied after this in the shader.
-     */
-    fun setCameraGeometry(bufW: Int, bufH: Int, rotationDeg: Int, outAspect: Float) {
-        val upright = if (rotationDeg % 180 == 0) bufW.toFloat() / bufH else bufH.toFloat() / bufW
-        var sx = 1f; var sy = 1f
-        if (upright > outAspect) sx = outAspect / upright else sy = upright / outAspect
-        // quad corners in upright UV (v up, like the SurfaceTexture convention): BL, BR, TL, TR
-        val corners = floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f)
-        for (i in 0 until 4) {
-            var u = 0.5f + (corners[2 * i] - 0.5f) * sx
-            var v = 0.5f + (corners[2 * i + 1] - 0.5f) * sy
-            // map upright → buffer space: rotate by −rotation around the centre
-            repeat(((rotationDeg % 360) + 360) % 360 / 90) {
-                val nu = v; val nv = 1f - u; u = nu; v = nv
-            }
-            camUv[2 * i] = u; camUv[2 * i + 1] = v
-        }
+    fun setCameraGeometry(bufW: Int, bufH: Int, sensorDeg: Int, displayDeg: Int, unmirror: Boolean, outAspect: Float) {
+        CameraUv.corners(bufW, bufH, sensorDeg, displayDeg, unmirror, outAspect).copyInto(camUv)
         camUvBuf.position(0); camUvBuf.put(camUv); camUvBuf.position(0)
     }
 
