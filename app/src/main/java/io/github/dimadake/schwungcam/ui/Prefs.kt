@@ -69,5 +69,10 @@ class Prefs(ctx: Context) {
         get() = p.getBoolean("keepwav", false)
         set(v) = p.edit().putBoolean("keepwav", v).apply()
 
+    /** Record the controls and screens beside each take, for captioning with an AI later. */
+    var aiTimeline: Boolean
+        get() = p.getBoolean("ai", false)
+        set(v) = p.edit().putBoolean("ai", v).apply()
+
     fun master() = MasterSettings(enabled = masterOn, glue = glue, targetLufs = target.lufs)
 }

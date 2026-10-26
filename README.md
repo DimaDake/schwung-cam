@@ -30,6 +30,13 @@ burned into the video, and the audio is mastered for YouTube after each take.
   384 kbps (or the encoder's max) and H.264 High, in
   `Movies/SchwungCam/*.mp4`. You can also keep the raw WAV
   (`Music/SchwungCam`).
+- **AI timeline** (Settings, off by default): beside each take,
+  `Documents/SchwungCam/<take>.ai.zip` holds what the hands did on the Move
+  (pads, steps, knob turns, buttons, transport lights) on the video's clock,
+  and the screens around each gesture as 1-bit PNGs plus contact sheets, with
+  a README for the agent. Hand it to an AI to caption the video. Screens are
+  picked around input, not on change, so an animated Movy page costs a few
+  frames per gesture. Design: `docs/superpowers/specs/2026-10-26-ai-timeline-design.md`.
 
 ## On the Move
 

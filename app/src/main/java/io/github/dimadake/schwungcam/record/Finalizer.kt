@@ -7,6 +7,9 @@ import android.media.MediaExtractor
 import android.media.MediaMuxer
 import android.net.Uri
 import android.provider.MediaStore
+import android.util.Log
+import io.github.dimadake.schwungcam.ai.AiExport
+import io.github.dimadake.schwungcam.ai.AiTake
 import io.github.dimadake.schwungcam.dsp.MasterReport
 import io.github.dimadake.schwungcam.dsp.MasterSettings
 import io.github.dimadake.schwungcam.dsp.Mastering
@@ -24,6 +27,7 @@ class Finalizer(private val resolver: ContentResolver, private val rate: Int = 4
         dir: File, name: String,
         video: VideoResult, audio: TakeAudio?, envelope: ClockEnvelope,
         master: MasterSettings, keepWav: Boolean,
+        ai: AiTake?,
         progress: (Float) -> Unit,
     ): FinalResult {
         val videoFile = File(dir, "video.mp4")
@@ -55,6 +59,17 @@ class Finalizer(private val resolver: ContentResolver, private val rate: Int = 4
             remux(videoFile, if (timeline != null) m4a else null, timeline, MediaMuxer(pfd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4))
         }
         resolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
+        if (ai != null) {
+            // the video is already safe; a failed timeline costs only itself
+            try {
+                val tl = timeline
+                val toSec: (Long) -> Double = if (tl != null) { ns -> (tl.posAt(ns) - tl.p0) / rate } else { ns -> (ns - video.firstFrameNs) / 1e9 }
+                saveAi(name, (video.lastPtsUs + FRAME_US) / 1e6, ai, toSec)
+            } catch (e: Exception) {
+                Log.w("SchwungCam", "ai timeline", e)
+                warning = listOfNotNull(warning, "The AI timeline could not be saved: ${e.message}").joinToString("\n\n")
+            }
+        }
         progress(1f)
         dir.deleteRecursively()
         return FinalResult(uri, name, report, warning)
@@ -96,6 +111,26 @@ class Finalizer(private val resolver: ContentResolver, private val rate: Int = 4
             put(MediaStore.Video.Media.IS_PENDING, 1)
         }
         return resolver.insert(MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), v)!!
+    }
+
+    /**
+     * Beside the take in name, under Documents/: MediaStore takes no zip under
+     * Movies/, which is for video only.
+     */
+    private fun saveAi(name: String, durationSec: Double, ai: AiTake, toSec: (Long) -> Double) {
+        val v = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, "$name.ai.zip")
+            put(MediaStore.MediaColumns.MIME_TYPE, "application/zip")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, "Documents/SchwungCam")
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), v) ?: error("MediaStore refused the file")
+        try {
+            resolver.openOutputStream(uri)!!.use { AiExport.write(it, name, durationSec, ai, toSec) }
+        } catch (e: Exception) {
+            resolver.delete(uri, null, null); throw e
+        }
+        resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
     }
 
     /** The unmastered audio trimmed to the video, so it lines up at 0 in a DAW. */

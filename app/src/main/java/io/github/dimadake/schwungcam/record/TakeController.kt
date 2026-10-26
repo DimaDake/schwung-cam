@@ -1,5 +1,7 @@
 package io.github.dimadake.schwungcam.record
 
+import io.github.dimadake.schwungcam.ai.AiRecorder
+import io.github.dimadake.schwungcam.ai.SurfaceSnapshot
 import io.github.dimadake.schwungcam.dsp.MasterSettings
 import io.github.dimadake.schwungcam.gl.RenderThread
 import io.github.dimadake.schwungcam.sync.ClockEnvelope
@@ -22,9 +24,14 @@ class TakeController(
     private var dir: File? = null
     private var name = ""
     @Volatile private var lastFrameNs = 0L
+    /** The take's AI timeline, when that option is on; fed from the stream thread. */
+    @Volatile private var ai: AiRecorder? = null
     val recording get() = enc != null
 
-    fun start(width: Int, height: Int, bitrate: Int) {
+    fun onScreen(lum: ByteArray, stampNs: Long) { ai?.onScreen(lum, stampNs) }
+    fun onSurface(s: SurfaceSnapshot, stampNs: Long) { ai?.onSurface(s, stampNs) }
+
+    fun start(width: Int, height: Int, bitrate: Int, aiTimeline: Boolean) {
         check(enc == null)
         name = "SchwungCam_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val d = File(cacheDir, "take-$name").apply { deleteRecursively(); mkdirs() }
@@ -33,6 +40,7 @@ class TakeController(
         enc = e
         pcm.start(WavWriter(File(d, "audio.wav"), rate))
         render.onFrameDrawn = { lastFrameNs = it }
+        ai = if (aiTimeline) AiRecorder() else null
         render.setEncoder(e.inputSurface, width, height)
     }
 
@@ -47,12 +55,14 @@ class TakeController(
         render.setEncoder(null, 0, 0)
         render.onFrameDrawn = null
         val d = dir!!
+        val takeAi = ai?.finish()
+        ai = null
         thread(name = "finalize") {
             val res = runCatching {
                 val video = e.finish() ?: error("no video frames were recorded")
                 waitForAudioTail()
                 val audio = pcm.stop()
-                finalizer.run(d, name, video, audio, envelope, master, keepWav, progress)
+                finalizer.run(d, name, video, audio, envelope, master, keepWav, takeAi, progress)
             }
             if (res.isFailure) { pcm.stop(); d.deleteRecursively() }
             done(res)

@@ -45,6 +45,7 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import io.github.dimadake.schwungcam.R
+import io.github.dimadake.schwungcam.ai.SurfaceSnapshot
 import io.github.dimadake.schwungcam.camera.CameraCatalog
 import io.github.dimadake.schwungcam.camera.CameraChoice
 import io.github.dimadake.schwungcam.camera.CameraController
@@ -59,6 +60,7 @@ import io.github.dimadake.schwungcam.stream.MoveStream
 import io.github.dimadake.schwungcam.stream.StreamState
 import io.github.dimadake.schwungcam.sync.ClockEnvelope
 import io.github.dimadake.schwungcam.sync.ScreenStamper
+import io.github.dimadake.schwungcam.sync.TickStamper
 
 class MainActivity : Activity() {
     private lateinit var prefs: Prefs
@@ -70,6 +72,7 @@ class MainActivity : Activity() {
     private lateinit var camera: CameraController
     private lateinit var stream: MoveStream
     private lateinit var stamper: ScreenStamper
+    private lateinit var surfaceStamper: TickStamper<SurfaceSnapshot>
     private lateinit var takes: TakeController
 
     private var cameraTex: SurfaceTexture? = null
@@ -140,13 +143,15 @@ class MainActivity : Activity() {
         render = RenderThread { tex -> ui.post { cameraTex = tex; openCamera() } }
         render.overlay = overlay()
         outSize().let { (w, h) -> render.setOutput(w, h) }
-        stamper = ScreenStamper(envelope) { render.pushScreen(it) }
+        stamper = ScreenStamper(envelope) { render.pushScreen(it); takes.onScreen(it.lum, it.stampNs) }
+        surfaceStamper = TickStamper(envelope) { s, ns -> takes.onSurface(s, ns) }
         takes = TakeController(cacheDir, render, pcm, envelope, Finalizer(contentResolver))
         stream = MoveStream(
             host = { prefs.host },
             clockNs = { camera.clockNs() },
             onScreen = { stamper.onScreen(it) },
-            onPcm = { envelope.add(it.arrivalNs, it.endPos); pcm.onChunk(it); stamper.onPcm(it) },
+            onPcm = { envelope.add(it.arrivalNs, it.endPos); pcm.onChunk(it); stamper.onPcm(it); surfaceStamper.onPcm(it) },
+            onSurface = { surfaceStamper.onItem(it, it.arrivalNs) },
             onState = { s -> if (s != streamState) { streamState = s; ui.post { updateStatus() } } },
         )
 
@@ -363,6 +368,7 @@ class MainActivity : Activity() {
         b.addView(toggle(getString(R.string.master), prefs.masterOn) { prefs.masterOn = it })
         b.addView(toggle(getString(R.string.glue), prefs.glue) { prefs.glue = it })
         b.addView(toggle(getString(R.string.keep_wav), prefs.keepWav) { prefs.keepWav = it })
+        b.addView(toggle(getString(R.string.ai_timeline), prefs.aiTimeline) { prefs.aiTimeline = it })
 
         b.addView(section(getString(R.string.host)))
         hostField = EditText(this).apply {
@@ -416,7 +422,7 @@ class MainActivity : Activity() {
         closePanel()
         val (w, h) = outSize()
         try {
-            takes.start(w, h, prefs.resolution.bitrate)
+            takes.start(w, h, prefs.resolution.bitrate, prefs.aiTimeline)
         } catch (e: Exception) {
             Toast.makeText(this, "Cannot record: ${e.message}", Toast.LENGTH_LONG).show(); return
         }

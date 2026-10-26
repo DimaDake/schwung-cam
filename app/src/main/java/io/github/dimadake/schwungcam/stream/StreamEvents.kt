@@ -1,5 +1,6 @@
 package io.github.dimadake.schwungcam.stream
 
+import io.github.dimadake.schwungcam.ai.SurfaceSnapshot
 import java.util.Base64
 
 const val SCREEN_W = 128
@@ -75,7 +76,7 @@ object ScreenDecoder {
 object StreamEvents {
     private val b64 = Base64.getDecoder()
 
-    /** Returns a [ScreenFrame], a [PcmChunk], or null for anything else (hb, surface…). */
+    /** Returns a [ScreenFrame], a [PcmChunk], a [SurfaceSnapshot], or null for anything else (hb, e16…). */
     fun decode(e: SseEvent): Any? = when (e.name) {
         "message" -> {
             val m = FlatJson.parse(e.data)
@@ -96,6 +97,12 @@ object StreamEvents {
                 }
                 if (n == 0) null else PcmChunk(pos, n, m["rate"]?.toIntOrNull() ?: 44100, pcm, e.arrivalNs)
             }
+        }
+        "surface" -> {
+            val m = FlatJson.parse(e.data)
+            val d = m["data"]
+            val frame = m["frame"]?.toLongOrNull()
+            if (d == null || frame == null || m["v"] != "1") null else SurfaceSnapshot.decode(frame, b64.decode(d), e.arrivalNs)
         }
         else -> null
     }

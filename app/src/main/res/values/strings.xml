@@ -16,6 +16,7 @@
     <string name="glue">Glue compressor</string>
     <string name="target">Loudness target</string>
     <string name="keep_wav">Keep raw WAV (Music/SchwungCam)</string>
+    <string name="ai_timeline">AI timeline: controls + screens (Documents/SchwungCam)</string>
     <string name="flip">Switch camera</string>
     <string name="video">Video</string>
     <string name="audio">Audio</string>

@@ -1,6 +1,7 @@
 package io.github.dimadake.schwungcam.stream
 
 import android.util.Log
+import io.github.dimadake.schwungcam.ai.SurfaceSnapshot
 import java.net.HttpURLConnection
 import java.net.Inet4Address
 import java.net.InetAddress
@@ -20,6 +21,7 @@ class MoveStream(
     private val onScreen: (ScreenFrame) -> Unit,
     private val onPcm: (PcmChunk) -> Unit,
     private val onState: (StreamState) -> Unit,
+    private val onSurface: (SurfaceSnapshot) -> Unit = {},
     private val port: Int = PORT,
 ) {
     @Volatile private var running = false
@@ -74,6 +76,7 @@ class MoveStream(
             when (val d = StreamEvents.decode(ev)) {
                 is ScreenFrame -> onScreen(d)
                 is PcmChunk -> { lastPcmNs = d.arrivalNs; onPcm(d) }
+                is SurfaceSnapshot -> onSurface(d)
             }
             val audio = clockNs() - lastPcmNs < 2_000_000_000L
             onState(if (audio) StreamState.LIVE else StreamState.SCREEN_ONLY)
