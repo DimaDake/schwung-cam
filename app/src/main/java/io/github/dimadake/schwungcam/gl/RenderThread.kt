@@ -29,6 +29,7 @@ class RenderThread(private val onCameraTexture: (SurfaceTexture) -> Unit) {
     private var outAspect = 16f / 9f
     private var camW = 0; private var camH = 0; private var camSensor = 0; private var camUnmirror = false
     private var displayDeg = 90
+    private var released = false
 
     @Volatile var overlay = Overlay()
     @Volatile var onFrameDrawn: ((Long) -> Unit)? = null
@@ -54,6 +55,7 @@ class RenderThread(private val onCameraTexture: (SurfaceTexture) -> Unit) {
     }
 
     fun setCamera(bufW: Int, bufH: Int, sensorDeg: Int, unmirror: Boolean) = handler.post {
+        if (released) return@post
         camW = bufW; camH = bufH; camSensor = sensorDeg; camUnmirror = unmirror
         camTex.setDefaultBufferSize(bufW, bufH)
         applyGeometry()
@@ -67,6 +69,7 @@ class RenderThread(private val onCameraTexture: (SurfaceTexture) -> Unit) {
     }
 
     fun setPreview(surface: Surface?, w: Int, h: Int) = handler.post {
+        if (released) return@post
         preview?.let { egl.makeCurrent(pbuf); egl.release(it) }
         preview = surface?.let { egl.windowSurface(it) }
         previewW = w; previewH = h
@@ -76,6 +79,7 @@ class RenderThread(private val onCameraTexture: (SurfaceTexture) -> Unit) {
     fun setEncoder(surface: Surface?, w: Int, h: Int) {
         val done = java.util.concurrent.CountDownLatch(1)
         handler.post {
+            if (released) { done.countDown(); return@post }
             encoder?.let { egl.makeCurrent(pbuf); egl.release(it) }
             encoder = surface?.let { egl.windowSurface(it) }
             encW = w; encH = h
@@ -97,6 +101,8 @@ class RenderThread(private val onCameraTexture: (SurfaceTexture) -> Unit) {
     }
 
     private fun drawFrame() {
+        // a frame queued before release() would otherwise run against a destroyed context
+        if (released) return
         egl.makeCurrent(pbuf)
         camTex.updateTexImage()
         camTex.getTransformMatrix(texMatrix)
@@ -130,6 +136,8 @@ class RenderThread(private val onCameraTexture: (SurfaceTexture) -> Unit) {
 
     fun release() {
         handler.post {
+            released = true
+            camTex.setOnFrameAvailableListener(null)
             preview?.let { egl.release(it) }; encoder?.let { egl.release(it) }
             camTex.release()
             EGL14.eglMakeCurrent(egl.display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)

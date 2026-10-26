@@ -44,9 +44,15 @@ class CameraUvTest {
         assertEquals((9f / 16f) * (9f / 16f), uv[5] - uv[1], 1e-5f)
     }
 
-    @Test fun `unmirror flips the natural horizontal`() {
-        val a = CameraUv.corners(1920, 1080, 270, 90, false, 16f / 9f)
-        val b = CameraUv.corners(1920, 1080, 270, 90, true, 16f / 9f)
-        for (i in 0 until 4) { assertEquals(1f - a[2 * i], b[2 * i], 1e-6f); assertEquals(a[2 * i + 1], b[2 * i + 1], 1e-6f) }
+    @Test fun `unmirror flips the upright picture left to right in every rotation`() {
+        for (d in listOf(0, 90, 180, 270)) {
+            val a = CameraUv.corners(1920, 1080, 270, d, false, 16f / 9f)
+            val b = CameraUv.corners(1920, 1080, 270, d, true, 16f / 9f)
+            // BL↔BR, TL↔TR: the same picture, columns reversed, so up stays up
+            for ((i, j) in listOf(0 to 1, 1 to 0, 2 to 3, 3 to 2)) {
+                assertEquals("display $d corner $i u", a[2 * j], b[2 * i], 1e-6f)
+                assertEquals("display $d corner $i v", a[2 * j + 1], b[2 * i + 1], 1e-6f)
+            }
+        }
     }
 }

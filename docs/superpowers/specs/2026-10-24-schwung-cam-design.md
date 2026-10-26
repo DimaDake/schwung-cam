@@ -97,8 +97,9 @@ Each entry is labelled by facing and 35 mm-equivalent focal length
   image is upright in the phone's natural orientation and only the display
   rotation is applied on top (`CameraUv`). *Changed in implementation:*
   rotating by the sensor orientation as well turned the video 90° on a
-  Pixel 9. Front lenses are never mirrored (`MIRROR_MODE_NONE` from API 33;
-  below that the compositor undoes the mirror), so preview and file agree.
+  Pixel 9. Front lenses are never mirrored: the compositor undoes the stream's
+  mirror, so preview and file agree. Not `MIRROR_MODE_NONE`: on a Pixel 9 it
+  turns the picture upside down.
 
 ## Compositor (OpenGL ES 2)
 

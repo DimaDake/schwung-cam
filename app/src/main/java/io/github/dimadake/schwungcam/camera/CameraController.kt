@@ -10,7 +10,6 @@ import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
-import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
@@ -34,7 +33,7 @@ class CameraController(private val cm: CameraManager) {
     @Volatile var clockNs: () -> Long = { SystemClock.elapsedRealtimeNanos() }
         private set
 
-    /** [unmirror]: the stream is mirrored (a front lens before API 33) and the compositor must undo it. */
+    /** [unmirror]: the stream is mirrored (a front lens) and the compositor must undo it. */
     class Opened(val bufSize: Size, val sensorDeg: Int, val unmirror: Boolean)
 
     /**
@@ -56,11 +55,13 @@ class CameraController(private val cm: CameraManager) {
             val size = CameraCatalog.bufferSize(lensCh, outW, outH)
             val sensor = lensCh.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
             val front = lensCh.get(CameraCharacteristics.LENS_FACING) == CameraMetadata.LENS_FACING_FRONT
-            // the video is never mirrored: preview and file must show the same picture
-            val canSkipMirror = Build.VERSION.SDK_INT >= 33
             val fps = ch.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
                 ?.filter { it.upper == 30 }?.maxByOrNull { it.lower } ?: Range(30, 30)
-            onReady(Opened(size, sensor, front && !canSkipMirror))
+            // the video is never mirrored: preview and file must show the same picture. The
+            // compositor undoes the stream's mirror; MIRROR_MODE_NONE would be the obvious way, but on a
+            // Pixel 9 it drops the flip in buffer space, which on a quarter-turned sensor comes out as a
+            // vertical flip: the picture lands upside down
+            onReady(Opened(size, sensor, front))
             tex.setDefaultBufferSize(size.width, size.height)
             val surface = Surface(tex)
             try {
@@ -77,7 +78,6 @@ class CameraController(private val cm: CameraManager) {
                     private fun configure(d: CameraDevice) {
                         val oc = OutputConfiguration(surface)
                         choice.physicalId?.let { oc.setPhysicalCameraId(it) }
-                        if (front && canSkipMirror) oc.mirrorMode = OutputConfiguration.MIRROR_MODE_NONE
                         val rb = d.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
                             addTarget(surface)
                             // a fixed rate: auto-exposure may not stretch frames in low light

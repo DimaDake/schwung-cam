@@ -15,8 +15,7 @@ object CameraUv {
     /**
      * [bufW]×[bufH] is the camera buffer, [sensorDeg] the lens's
      * SENSOR_ORIENTATION, [displayDeg] the display rotation (Surface.ROTATION_*
-     * in degrees), [unmirror] undoes a front lens's mirror when the camera could
-     * not be asked to skip it.
+     * in degrees), [unmirror] undoes a front lens's mirror.
      */
     fun corners(bufW: Int, bufH: Int, sensorDeg: Int, displayDeg: Int, unmirror: Boolean, outAspect: Float): FloatArray {
         val natural = if (norm(sensorDeg) % 180 == 0) bufW.toFloat() / bufH else bufH.toFloat() / bufW
@@ -28,9 +27,11 @@ object CameraUv {
         for (i in 0 until 4) {
             var u = 0.5f + (corners[2 * i] - 0.5f) * sx
             var v = 0.5f + (corners[2 * i + 1] - 0.5f) * sy
+            // mirror the upright picture, not the natural one: a reflection reverses a rotation, so
+            // flipping after the turn below lands a front lens upside down in landscape
+            if (unmirror) u = 1f - u
             // window → natural: each quarter of display rotation turns the image one step
             repeat(norm(displayDeg) / 90) { val nu = v; val nv = 1f - u; u = nu; v = nv }
-            if (unmirror) u = 1f - u
             out[2 * i] = u; out[2 * i + 1] = v
         }
         return out
