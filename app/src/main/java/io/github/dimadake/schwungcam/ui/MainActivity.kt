@@ -124,6 +124,13 @@ class MainActivity : Activity() {
         panel = findViewById(R.id.panel)
         panelBody = findViewById(R.id.panel_body)
         lastTake.clipToOutline = true
+        val frame = findViewById<View>(R.id.frame)
+        findViewById<View>(R.id.viewfinder).addOnLayoutChangeListener { v, l, t, r, b, ol, ot, or, ob ->
+            if (r - l == or - ol && b - t == ob - ot) return@addOnLayoutChangeListener
+            val (x, y, w, h) = RenderThread.letterbox(r - l, b - t, outAspect())
+            // from inside a layout pass: the new size only takes on the next one
+            frame.post { frame.layoutParams = FrameLayout.LayoutParams(w, h).apply { leftMargin = x; topMargin = y } }
+        }
         if (!portrait) {
             // a full-width card would cover the whole landscape frame
             panel.layoutParams = (panel.layoutParams as FrameLayout.LayoutParams).apply { width = dp(400); gravity = Gravity.TOP or Gravity.START }
@@ -169,8 +176,9 @@ class MainActivity : Activity() {
 
     private fun key(c: CameraChoice) = c.id + "/" + (c.physicalId ?: "")
 
+    /** The saved lens, unless it is no longer a chip (then that side's main lens). */
     private fun current(): CameraChoice? =
-        choices.firstOrNull { key(it) == prefs.camera }
+        choices.firstOrNull { key(it) == prefs.camera }?.let { c -> c.takeIf { it in CameraCatalog.zoomStops(choices, it.facing) } ?: CameraCatalog.main(choices, c.facing) }
             ?: CameraCatalog.main(choices, CameraMetadata.LENS_FACING_BACK) ?: choices.firstOrNull()
 
     private fun openCamera() {
@@ -199,7 +207,7 @@ class MainActivity : Activity() {
     private fun buildLenses() {
         lenses.removeAllViews()
         val cur = current() ?: return
-        val side = choices.filter { it.facing == cur.facing }
+        val side = CameraCatalog.zoomStops(choices, cur.facing)
         val main = CameraCatalog.main(choices, cur.facing)
         for (c in side) {
             val sel = key(c) == key(cur)

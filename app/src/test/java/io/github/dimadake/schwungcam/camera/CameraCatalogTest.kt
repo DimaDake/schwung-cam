@@ -24,4 +24,9 @@ class CameraCatalogTest {
         val main = CameraCatalog.main(pixel, LENS_FACING_BACK)
         assertEquals(listOf("0.5", "1", "2"), pixel.take(3).map { CameraCatalog.zoomLabel(it, main) })
     }
+
+    @Test fun `a lens next to the main one is not a zoom stop`() {
+        assertEquals(listOf("Front 23mm"), CameraCatalog.zoomStops(pixel, LENS_FACING_FRONT).map { it.label })
+        assertEquals(listOf("Back 12mm", "Back 24mm", "Back 49mm"), CameraCatalog.zoomStops(pixel, LENS_FACING_BACK).map { it.label })
+    }
 }

@@ -49,6 +49,17 @@ object CameraCatalog {
             ?: side.minByOrNull { abs((it.mm ?: 24) - 24) }
     }
 
+    /**
+     * The zoom chips for one side: the main lens plus the lenses that really
+     * zoom. A lens within 20 % of the main one (the Pixel's 21 mm beside its
+     * 23 mm selfie lens) would be a second "1×" chip that changes nothing.
+     */
+    fun zoomStops(choices: List<CameraChoice>, facing: Int): List<CameraChoice> {
+        val main = main(choices, facing) ?: return emptyList()
+        val m = main.mm ?: return choices.filter { it.facing == facing }
+        return choices.filter { it.facing == facing && (it === main || abs((it.mm ?: m).toFloat() / m - 1f) >= 0.2f) }
+    }
+
     /** Pixel-style zoom label relative to the main lens: "0.5", "1", "2". */
     fun zoomLabel(c: CameraChoice, main: CameraChoice?): String {
         val m = main?.mm ?: return c.label

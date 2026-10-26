@@ -112,10 +112,8 @@ class RenderThread(private val onCameraTexture: (SurfaceTexture) -> Unit) {
         val ov = overlay
         preview?.let { p ->
             egl.makeCurrent(p)
-            // letterbox the output aspect inside the view
-            var vw = previewW; var vh = (previewW / outAspect).toInt()
-            if (vh > previewH) { vh = previewH; vw = (previewH * outAspect).toInt() }
-            comp.draw(texMatrix, ov, scr != null, (previewW - vw) / 2, (previewH - vh) / 2, vw, vh, previewW, previewH)
+            val r = letterbox(previewW, previewH, outAspect)
+            comp.draw(texMatrix, ov, scr != null, r[0], r[1], r[2], r[3], previewW, previewH)
             egl.swap(p)
         }
         encoder?.let { e ->
@@ -128,10 +126,15 @@ class RenderThread(private val onCameraTexture: (SurfaceTexture) -> Unit) {
     }
 
     /** Content rectangle of the preview inside a view of this size: x, y, w, h. */
-    fun previewRect(viewW: Int, viewH: Int): IntArray {
-        var vw = viewW; var vh = (viewW / outAspect).toInt()
-        if (vh > viewH) { vh = viewH; vw = (viewH * outAspect).toInt() }
-        return intArrayOf((viewW - vw) / 2, (viewH - vh) / 2, vw, vh)
+    fun previewRect(viewW: Int, viewH: Int): IntArray = letterbox(viewW, viewH, outAspect)
+
+    companion object {
+        /** The largest [aspect] rectangle centred in [viewW]×[viewH]: x, y, w, h. */
+        fun letterbox(viewW: Int, viewH: Int, aspect: Float): IntArray {
+            var vw = viewW; var vh = (viewW / aspect).toInt()
+            if (vh > viewH) { vh = viewH; vw = (viewH * aspect).toInt() }
+            return intArrayOf((viewW - vw) / 2, (viewH - vh) / 2, vw, vh)
+        }
     }
 
     fun release() {
