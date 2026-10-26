@@ -6,6 +6,7 @@
     android:orientation="horizontal">
 
     <FrameLayout
+        android:id="@+id/viewfinder"
         android:layout_width="0dp"
         android:layout_height="match_parent"
         android:layout_weight="1">
@@ -15,103 +16,37 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
-        <TextView
-            android:id="@+id/status"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_margin="8dp"
-            android:background="#99000000"
-            android:padding="6dp"
-            android:textColor="#FFFFFF"
-            android:textSize="13sp" />
+        <LinearLayout
+            android:id="@+id/lenses"
+            style="@style/LensBar"
+            android:layout_gravity="end|center_vertical"
+            android:layout_marginEnd="16dp"
+            android:orientation="vertical" />
+
+        <include layout="@layout/viewfinder_chrome" />
     </FrameLayout>
 
-    <ScrollView
-        android:layout_width="200dp"
-        android:layout_height="match_parent"
-        android:background="#1A1A1A">
+    <FrameLayout
+        android:layout_width="120dp"
+        android:layout_height="match_parent">
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="10dp">
+        <ImageButton
+            android:id="@+id/flip"
+            style="@style/FlipButton"
+            android:layout_gravity="top|center_horizontal"
+            android:layout_marginTop="48dp" />
 
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
+        <io.github.dimadake.schwungcam.ui.ShutterButton
+            android:id="@+id/record"
+            android:layout_width="80dp"
+            android:layout_height="80dp"
+            android:layout_gravity="center"
+            android:contentDescription="@string/record" />
 
-                <ImageView
-                    android:id="@+id/last_take"
-                    android:layout_width="56dp"
-                    android:layout_height="56dp"
-                    android:layout_marginEnd="8dp"
-                    android:background="#333333"
-                    android:contentDescription="@string/last_take"
-                    android:scaleType="centerCrop"
-                    android:visibility="gone" />
-
-                <Button
-                    android:id="@+id/record"
-                    android:layout_width="0dp"
-                    android:layout_height="64dp"
-                    android:layout_weight="1"
-                    android:backgroundTint="#C62828"
-                    android:text="@string/record"
-                    android:textColor="#FFFFFF"
-                    android:textSize="18sp" />
-            </LinearLayout>
-
-            <TextView
-                android:id="@+id/timer"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center"
-                android:paddingBottom="6dp"
-                android:text="00:00"
-                android:textColor="#FFFFFF"
-                android:textSize="16sp" />
-
-            <TextView style="@style/Label" android:text="@string/camera" />
-
-            <Spinner
-                android:id="@+id/camera"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
-
-            <Switch
-                android:id="@+id/aelock"
-                style="@style/Toggle"
-                android:text="@string/exposure_lock" />
-
-            <Switch
-                android:id="@+id/overlay"
-                style="@style/Toggle"
-                android:text="@string/screen_overlay" />
-
-            <TextView style="@style/Label" android:text="@string/transparent" />
-
-            <Spinner
-                android:id="@+id/key"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
-
-            <TextView style="@style/Label" android:text="@string/opacity" />
-
-            <SeekBar
-                android:id="@+id/opacity"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:max="100" />
-
-            <Button
-                android:id="@+id/settings"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:text="@string/settings" />
-        </LinearLayout>
-    </ScrollView>
+        <ImageView
+            android:id="@+id/last_take"
+            style="@style/Thumb"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="48dp" />
+    </FrameLayout>
 </LinearLayout>

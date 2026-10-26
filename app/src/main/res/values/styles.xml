@@ -3,17 +3,42 @@
     <style name="AppTheme" parent="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen">
         <item name="android:windowBackground">@android:color/black</item>
     </style>
-    <style name="Label">
-        <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginTop">8dp</item>
-        <item name="android:textColor">#AAAAAA</item>
-        <item name="android:textSize">12sp</item>
+    <style name="RoundButton">
+        <item name="android:layout_width">44dp</item>
+        <item name="android:layout_height">44dp</item>
+        <item name="android:layout_marginStart">8dp</item>
+        <item name="android:background">@drawable/bg_round</item>
+        <item name="android:tint">@color/round_icon</item>
+        <item name="android:scaleType">center</item>
     </style>
-    <style name="Toggle">
+    <style name="FlipButton" parent="RoundButton">
+        <item name="android:layout_width">52dp</item>
+        <item name="android:layout_height">52dp</item>
+        <item name="android:layout_marginStart">0dp</item>
+        <item name="android:src">@drawable/ic_flip</item>
+        <item name="android:contentDescription">@string/flip</item>
+    </style>
+    <style name="Thumb">
+        <item name="android:layout_width">52dp</item>
+        <item name="android:layout_height">52dp</item>
+        <item name="android:background">@drawable/bg_thumb</item>
+        <item name="android:padding">2dp</item>
+        <item name="android:scaleType">centerCrop</item>
+        <item name="android:contentDescription">@string/last_take</item>
+        <item name="android:visibility">invisible</item>
+    </style>
+    <style name="LensBar">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:background">@drawable/bg_pill</item>
+        <item name="android:padding">4dp</item>
+    </style>
+    <style name="PanelTitle">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginTop">8dp</item>
-        <item name="android:minHeight">40dp</item>
+        <item name="android:layout_marginTop">14dp</item>
+        <item name="android:layout_marginBottom">6dp</item>
+        <item name="android:textColor">#C4C7C5</item>
+        <item name="android:textSize">13sp</item>
     </style>
 </resources>

@@ -16,7 +16,7 @@ masters the audio for a YouTube upload.
 - Master the audio after the take (−14 LUFS / −1 dBTP by default) and write
   a YouTube-ready MP4 to `Movies/SchwungCam`.
 
-Non-goals: microphone recording, live streaming, editing, portrait video.
+Non-goals: microphone recording, live streaming, editing.
 
 ## Source stream
 
@@ -84,10 +84,15 @@ Each entry is labelled by facing and 35 mm-equivalent focal length
 - Fixed `CONTROL_AE_TARGET_FPS_RANGE` [30,30], so low light never drops the
   frame rate.
 - **Exposure lock** sets `CONTROL_AE_LOCK` and `CONTROL_AWB_LOCK` together.
+  It starts off at every launch (a lock from yesterday is the wrong exposure
+  for today's light) and survives only a rotation.
 - Output 720p / 1080p (default) / 2160p, whichever are 16:9 and supported. The
   camera stream is center-cropped to 16:9 in the shader.
-- The activity follows both landscape directions and locks the current one
-  while recording. Camera2 already gives the stream a transform for the
+- The activity follows the phone in every orientation (as camera apps do,
+  regardless of the system rotation lock) and locks the current one from
+  Record until the take is saved. Portrait records a 9:16 file (the chosen
+  resolution stood on end); an encoder that cannot take that size, e.g.
+  portrait 4K on some phones, is refused at Record with a message. Camera2 already gives the stream a transform for the
   sensor orientation, and the `SurfaceTexture` matrix includes it, so the
   image is upright in the phone's natural orientation and only the display
   rotation is applied on top (`CameraUv`). *Changed in implementation:*
@@ -111,7 +116,8 @@ frame), `w` (width fraction 0.05..1; the height follows the 2:1 aspect),
 `key` ∈ {none, black transparent, white transparent}, and `opacity` 0..1.
 Alpha per pixel is: `1` for none, `lum` for black transparent, `1−lum` for
 white transparent; each is multiplied by `opacity`. Drag moves the center and
-pinch scales; the overlay is clamped to stay inside the frame. The geometry
+pinch scales; the overlay is clamped to stay inside the frame. Place and size
+are kept separately for portrait and landscape. The geometry
 lives in normalised frame coordinates, so the preview is exactly the file.
 
 ## Recording
@@ -170,16 +176,27 @@ the save; only a warning gets a dialog.
 
 ## UI
 
-A single landscape activity:
+One activity, laid out like Pixel Camera, with a portrait and a landscape
+layout:
 
-- Full-screen preview with the overlay drawn on top; drag and pinch edit it
-  while the overlay is on.
-- Right rail: last-take thumbnail and record button, with timer; camera picker; Exposure lock; Overlay
-  on/off; Key mode; Opacity.
-- Status line: stream state (offline / screen only / live), measured transit,
-  and the pcm gap count during the take.
-- Settings sheet: host, resolution, mastering on/off, glue on/off, target,
-  keep raw WAV.
+- Full-bleed viewfinder (letterboxed to the output aspect). Over its top: a
+  status chip (coloured dot: live / no audio / connecting / offline; tap opens
+  settings) and round quick toggles for Exposure lock, Move screen and
+  Settings (yellow when on).
+- Zoom chips (0.5 · 1× · 2×, from 35 mm-equivalent focal lengths relative to
+  the main lens) float at the bottom of the viewfinder, or its right edge in
+  landscape. A logical camera's own main lens, which appears twice, is listed
+  once. The default is the main back lens.
+- Controls bar (bottom in portrait, right in landscape): last-take thumbnail,
+  the shutter (white ring, red disc → stop square while recording, progress
+  ring while saving), and the front/back flip.
+- A red timer pill while recording, then "Saving n%".
+- Lens, flip, gallery and settings are hidden during a take; Exposure lock and
+  Move screen stay live.
+- Settings is an in-viewfinder card with chips and switches, applied at once:
+  key mode and opacity, resolution, loudness target, mastering, glue, keep
+  WAV, host. Tapping the picture closes it.
+- Drag and pinch on the picture move and size the Move screen while it is on.
 
 Plain Android Views, Kotlin, minSdk 29, targetSdk 34, no third-party runtime
 dependencies. Cleartext HTTP is allowed (the Move speaks plain http).

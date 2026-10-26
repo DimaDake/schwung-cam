@@ -9,9 +9,12 @@ burned into the video, and the audio is mastered for YouTube after each take.
 
 ## Features
 
+- **Pixel Camera-style UI** in portrait and landscape: zoom chips, a
+  shutter that becomes a stop button, a last-take thumbnail that opens the
+  video in the gallery, and quick toggles over the viewfinder.
 - **Camera**: every lens the phone exposes (main, ultrawide, tele, front);
-  720p / 1080p / 4K at a fixed 30 fps; **exposure lock**, which locks AE and
-  white balance together.
+  720p / 1080p / 4K at a fixed 30 fps, as 16:9 or, held upright, 9:16;
+  **exposure lock**, which locks AE and white balance together.
 - **Schwung audio**: 44.1 kHz stereo from `/stream-auto?v=2&audio=1`. Dropouts
   are filled with silence so the timeline never shrinks.
 - **Sync, automatic**: pcm arrivals are lower-enveloped per second, so Wi-Fi

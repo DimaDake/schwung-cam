@@ -12,8 +12,8 @@ enum class Resolution(val label: String, val w: Int, val h: Int, val bitrate: In
 }
 
 enum class Target(val label: String, val lufs: Double) {
-    YOUTUBE("YouTube (−14 LUFS)", -14.0),
-    LOUD("Loud (−9 LUFS)", -9.0),
+    YOUTUBE("YouTube −14", -14.0),
+    LOUD("Loud −9", -9.0),
 }
 
 class Prefs(ctx: Context) {
@@ -31,19 +31,27 @@ class Prefs(ctx: Context) {
         get() = runCatching { Resolution.valueOf(p.getString("res", "P1080")!!) }.getOrDefault(Resolution.P1080)
         set(v) = p.edit().putString("res", v.name).apply()
 
-    var exposureLock: Boolean
-        get() = p.getBoolean("aelock", false)
-        set(v) = p.edit().putBoolean("aelock", v).apply()
-
-    var overlay: Overlay
-        get() = Overlay(
+    /**
+     * The overlay, with its place and size kept per orientation: a spot that
+     * suits a landscape frame rarely suits a portrait one. On/off, key and
+     * opacity are shared.
+     */
+    fun overlay(portrait: Boolean): Overlay {
+        val k = if (portrait) "ovp_" else "ov_"
+        val d = if (portrait) Overlay(cx = 0.5f, cy = 0.88f, w = 0.6f) else Overlay()
+        return Overlay(
             enabled = p.getBoolean("ov_on", false),
-            cx = p.getFloat("ov_cx", 0.82f), cy = p.getFloat("ov_cy", 0.82f), w = p.getFloat("ov_w", 0.3f),
+            cx = p.getFloat(k + "cx", d.cx), cy = p.getFloat(k + "cy", d.cy), w = p.getFloat(k + "w", d.w),
             key = runCatching { KeyMode.valueOf(p.getString("ov_key", "BLACK_TRANSPARENT")!!) }.getOrDefault(KeyMode.BLACK_TRANSPARENT),
             opacity = p.getFloat("ov_op", 1f),
         )
-        set(o) = p.edit().putBoolean("ov_on", o.enabled).putFloat("ov_cx", o.cx).putFloat("ov_cy", o.cy)
-            .putFloat("ov_w", o.w).putString("ov_key", o.key.name).putFloat("ov_op", o.opacity).apply()
+    }
+
+    fun setOverlay(portrait: Boolean, o: Overlay) {
+        val k = if (portrait) "ovp_" else "ov_"
+        p.edit().putBoolean("ov_on", o.enabled).putFloat(k + "cx", o.cx).putFloat(k + "cy", o.cy)
+            .putFloat(k + "w", o.w).putString("ov_key", o.key.name).putFloat("ov_op", o.opacity).apply()
+    }
 
     var masterOn: Boolean
         get() = p.getBoolean("master", true)

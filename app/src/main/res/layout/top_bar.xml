@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- over the top of the viewfinder: stream status, then the quick toggles -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_gravity="top"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:padding="12dp">
+
+    <LinearLayout
+        android:id="@+id/status_chip"
+        android:layout_width="0dp"
+        android:layout_height="36dp"
+        android:layout_weight="1"
+        android:background="@drawable/bg_pill"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingEnd="14dp">
+
+        <View
+            android:id="@+id/status_dot"
+            android:layout_width="8dp"
+            android:layout_height="8dp"
+            android:background="@drawable/bg_dot" />
+
+        <TextView
+            android:id="@+id/status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:ellipsize="end"
+            android:singleLine="true"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+    <Space
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_weight="0.15" />
+
+    <ImageButton
+        android:id="@+id/aelock"
+        style="@style/RoundButton"
+        android:contentDescription="@string/exposure_lock"
+        android:src="@drawable/ic_lock_open" />
+
+    <ImageButton
+        android:id="@+id/overlay"
+        style="@style/RoundButton"
+        android:contentDescription="@string/screen_overlay"
+        android:src="@drawable/ic_screen" />
+
+    <ImageButton
+        android:id="@+id/settings"
+        style="@style/RoundButton"
+        android:contentDescription="@string/settings"
+        android:src="@drawable/ic_settings" />
+</LinearLayout>

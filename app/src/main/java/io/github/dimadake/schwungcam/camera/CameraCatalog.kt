@@ -10,7 +10,7 @@ import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 /** A selectable lens: a camera id, plus a physical lens of it when it is a logical multi-camera. */
-data class CameraChoice(val id: String, val physicalId: String?, val label: String, val facing: Int)
+data class CameraChoice(val id: String, val physicalId: String?, val label: String, val facing: Int, val mm: Int?)
 
 object CameraCatalog {
     fun list(cm: CameraManager): List<CameraChoice> {
@@ -20,9 +20,10 @@ object CameraCatalog {
             val facing = ch.get(CameraCharacteristics.LENS_FACING) ?: CameraMetadata.LENS_FACING_BACK
             val side = when (facing) { CameraMetadata.LENS_FACING_FRONT -> "Front"; CameraMetadata.LENS_FACING_EXTERNAL -> "External"; else -> "Back" }
             val mm = equivMm(ch)
-            var label = if (mm != null) "$side ${mm}mm" else side
-            if (!seen.add(label)) label = "$label (${phys ?: id})"
-            out.add(CameraChoice(id, phys, label, facing))
+            val label = if (mm != null) "$side ${mm}mm" else side
+            // a logical camera is listed before its own lenses, so the physical twin of its main lens drops out
+            if (!seen.add(label)) return
+            out.add(CameraChoice(id, phys, label, facing, mm))
         }
         for (id in cm.cameraIdList) {
             val ch = cm.getCameraCharacteristics(id)
@@ -38,7 +39,21 @@ object CameraCatalog {
             }
         }
         // back lenses first, widest first within a side
-        return out.sortedWith(compareBy({ it.facing != CameraMetadata.LENS_FACING_BACK }, { it.label.filter(Char::isDigit).toIntOrNull() ?: 0 }))
+        return out.sortedWith(compareBy({ it.facing != CameraMetadata.LENS_FACING_BACK }, { it.mm ?: 0 }))
+    }
+
+    /** The "1×" lens of a side: its logical camera when there is one, else the lens nearest 24 mm. */
+    fun main(choices: List<CameraChoice>, facing: Int): CameraChoice? {
+        val side = choices.filter { it.facing == facing }
+        return side.firstOrNull { it.physicalId == null && side.any { o -> o.id == it.id && o.physicalId != null } }
+            ?: side.minByOrNull { abs((it.mm ?: 24) - 24) }
+    }
+
+    /** Pixel-style zoom label relative to the main lens: "0.5", "1", "2". */
+    fun zoomLabel(c: CameraChoice, main: CameraChoice?): String {
+        val m = main?.mm ?: return c.label
+        val r = (c.mm ?: m).toFloat() / m
+        return if (abs(r - r.roundToInt()) < 0.15f && r >= 1f) "${r.roundToInt()}" else "%.1f".format(r).trimEnd('0').trimEnd('.')
     }
 
     /** 35 mm-equivalent focal length. */

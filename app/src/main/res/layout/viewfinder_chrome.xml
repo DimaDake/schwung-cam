@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- everything drawn over the picture; the same in both orientations -->
+<merge xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <include layout="@layout/top_bar" />
+
+    <TextView
+        android:id="@+id/timer"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="64dp"
+        android:background="@drawable/bg_timer"
+        android:fontFeatureSettings="tnum"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="4dp"
+        android:textColor="#FFFFFF"
+        android:textSize="15sp"
+        android:visibility="gone" />
+
+    <ScrollView
+        android:id="@+id/panel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginHorizontal="12dp"
+        android:layout_marginTop="60dp"
+        android:layout_marginBottom="12dp"
+        android:background="@drawable/bg_panel"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:id="@+id/panel_body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="20dp"
+            android:paddingVertical="12dp" />
+    </ScrollView>
+</merge>

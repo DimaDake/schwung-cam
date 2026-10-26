@@ -38,6 +38,11 @@ class VideoEncoder(private val out: File, val width: Int, val height: Int, bitra
             setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR)
         }
         val caps = codec.codecInfo.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)
+        // portrait 4K is past some encoders' height limit; say so instead of recording a broken file
+        if (!caps.videoCapabilities.isSizeSupported(width, height)) {
+            codec.release(); thread.quitSafely()
+            throw IllegalStateException("this phone cannot encode ${width}×$height video")
+        }
         caps.profileLevels.filter { it.profile == MediaCodecInfo.CodecProfileLevel.AVCProfileHigh }
             .maxByOrNull { it.level }?.let {
                 fmt.setInteger(MediaFormat.KEY_PROFILE, it.profile)

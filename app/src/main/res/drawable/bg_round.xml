@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- the quick toggles over the viewfinder; activated = the setting is on -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_activated="true">
+        <shape android:shape="oval"><solid android:color="#FDD663" /></shape>
+    </item>
+    <item>
+        <shape android:shape="oval"><solid android:color="#66000000" /></shape>
+    </item>
+</selector>
