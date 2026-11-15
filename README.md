@@ -38,6 +38,14 @@ burned into the video, and the audio is mastered for YouTube after each take.
   picked around input, not on change, so an animated Movy page costs a few
   frames per gesture. Design: `docs/superpowers/specs/2026-10-26-ai-timeline-design.md`.
 
+- **Link Audio stems** (Settings, off by default): pick any channels the Link
+  session shares (movy's 16 tracks, 3 sends and master, or Live's) and each
+  take also saves them raw as 24-bit WAVs in `Music/SchwungCam/<take>/`, every
+  file starting at the video's first frame, so they drop into a DAW at 0 lined
+  up with the picture. Buffers are placed by the Link beat they were stamped
+  with, so Wi-Fi delay does not move them. Turn on LINK in movy's Settings.
+  Design: `docs/superpowers/specs/2026-11-15-link-stems-design.md`.
+
 ## On the Move
 
 Audio flows only while Schwung's **Mirror Display** setting is on. The status
@@ -47,12 +55,20 @@ query, or you can enter an IP in Settings.
 
 ## Build and install
 
-Needs JDK 17 and the Android SDK (platform 34).
+Needs JDK 17, the Android SDK (platform 34), NDK 27.2.12479018 and CMake 3.22.1
+(`sdkmanager "ndk;27.2.12479018" "cmake;3.22.1"`), and the Link submodule
+(`git submodule update --init --recursive`).
 
 ```bash
 ./gradlew testDebugUnitTest    # JVM tests: parser, sync, take, loudness, limiter, mastering
 ./gradlew assembleDebug        # app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/debug/app-debug.apk
+tools/build-probe.sh           # the stems core on this Mac: build-probe/stems_probe --channel "Movy Master"
 ```
+
+## License
+
+GPL-2.0-or-later (`LICENSE.md`), because it links the Ableton Link SDK; see
+`THIRD_PARTY_LICENSES.md`.
 
 Design: [`docs/superpowers/specs/2026-10-24-schwung-cam-design.md`](docs/superpowers/specs/2026-10-24-schwung-cam-design.md).

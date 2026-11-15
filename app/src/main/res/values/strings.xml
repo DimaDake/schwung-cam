@@ -20,4 +20,9 @@
     <string name="flip">Switch camera</string>
     <string name="video">Video</string>
     <string name="audio">Audio</string>
+    <string name="link_stems">Link Audio stems</string>
+    <string name="link_stems_on">Record picked channels as WAVs (Music/SchwungCam/&lt;take&gt;)</string>
+    <string name="link_looking">Looking for a Link session… Turn on LINK in movy\'s Settings.</string>
+    <string name="link_unavailable">Link is not in this build.</string>
+    <string name="link_absent">not in the session</string>
 </resources>

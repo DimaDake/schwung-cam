@@ -6,6 +6,7 @@ plugins {
 android {
     namespace = "io.github.dimadake.schwungcam"
     compileSdk = 34
+    ndkVersion = "27.2.12479018"
 
     defaultConfig {
         applicationId = "io.github.dimadake.schwungcam"
@@ -13,6 +14,12 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "0.1.0"
+        ndk { abiFilters += listOf("arm64-v8a") }
+    }
+
+    // the Link SDK (GPL-2.0-or-later) for Link Audio stems
+    externalNativeBuild {
+        cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" }
     }
 
     buildTypes {

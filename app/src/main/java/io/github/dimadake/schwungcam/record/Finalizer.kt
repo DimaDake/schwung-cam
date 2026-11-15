@@ -13,6 +13,8 @@ import io.github.dimadake.schwungcam.ai.AiTake
 import io.github.dimadake.schwungcam.dsp.MasterReport
 import io.github.dimadake.schwungcam.dsp.MasterSettings
 import io.github.dimadake.schwungcam.dsp.Mastering
+import io.github.dimadake.schwungcam.link.StemExport
+import io.github.dimadake.schwungcam.link.StemsTake
 import io.github.dimadake.schwungcam.sync.ClockEnvelope
 import io.github.dimadake.schwungcam.sync.Timeline
 import java.io.File
@@ -28,6 +30,7 @@ class Finalizer(private val resolver: ContentResolver, private val rate: Int = 4
         video: VideoResult, audio: TakeAudio?, envelope: ClockEnvelope,
         master: MasterSettings, keepWav: Boolean,
         ai: AiTake?,
+        stems: StemsTake?,
         progress: (Float) -> Unit,
     ): FinalResult {
         val videoFile = File(dir, "video.mp4")
@@ -59,16 +62,27 @@ class Finalizer(private val resolver: ContentResolver, private val rate: Int = 4
             remux(videoFile, if (timeline != null) m4a else null, timeline, MediaMuxer(pfd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4))
         }
         resolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
+        // camera time → seconds into the video, on the same clock the frames were placed by
+        val tl = timeline
+        val toSec: (Long) -> Double = if (tl != null) { ns -> (tl.posAt(ns) - tl.p0) / rate } else { ns -> (ns - video.firstFrameNs) / 1e9 }
+        val durationSec = (video.lastPtsUs + FRAME_US) / 1e6
         if (ai != null) {
             // the video is already safe; a failed timeline costs only itself
             try {
-                val tl = timeline
-                val toSec: (Long) -> Double = if (tl != null) { ns -> (tl.posAt(ns) - tl.p0) / rate } else { ns -> (ns - video.firstFrameNs) / 1e9 }
-                saveAi(name, (video.lastPtsUs + FRAME_US) / 1e6, ai, toSec)
+                saveAi(name, durationSec, ai, toSec)
             } catch (e: Exception) {
                 Log.w("SchwungCam", "ai timeline", e)
                 warning = listOfNotNull(warning, "The AI timeline could not be saved: ${e.message}").joinToString("\n\n")
             }
+        }
+        if (stems != null) {
+            val notes = try {
+                saveStems(name, stems, durationSec, toSec)
+            } catch (e: Exception) {
+                Log.w("SchwungCam", "link stems", e)
+                listOf("The Link stems could not be saved: ${e.message}")
+            }
+            if (notes.isNotEmpty()) warning = (listOfNotNull(warning) + notes).joinToString("\n\n")
         }
         progress(1f)
         dir.deleteRecursively()
@@ -131,6 +145,36 @@ class Finalizer(private val resolver: ContentResolver, private val rate: Int = 4
             resolver.delete(uri, null, null); throw e
         }
         resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+    }
+
+    /**
+     * Each stem as `Music/SchwungCam/<take>/<channel>.wav`, 24-bit, from the
+     * video's first frame to its last, so all of them line up at 0 in a DAW.
+     * Returns what the take's result should say about them.
+     */
+    private fun saveStems(name: String, take: StemsTake, durationSec: Double, toSec: (Long) -> Double): List<String> {
+        val notes = ArrayList<String>()
+        val files = StemExport.fileNames(take.stems.map { it.peer to it.name })
+        take.stems.forEachIndexed { i, st ->
+            val (skip, len) = StemExport.range(toSec(st.anchorNs), st.rate, durationSec)
+            val v = ContentValues().apply {
+                put(MediaStore.Audio.Media.DISPLAY_NAME, "${files[i]}.wav")
+                put(MediaStore.Audio.Media.MIME_TYPE, "audio/wav")
+                put(MediaStore.Audio.Media.RELATIVE_PATH, "Music/SchwungCam/$name")
+                put(MediaStore.Audio.Media.IS_PENDING, 1)
+            }
+            val uri = resolver.insert(MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), v) ?: error("MediaStore refused ${files[i]}.wav")
+            try {
+                resolver.openOutputStream(uri)!!.use { StemExport.write24(it, st.file, st.rate, skip, len) }
+            } catch (e: Exception) {
+                resolver.delete(uri, null, null); throw e
+            }
+            resolver.update(uri, ContentValues().apply { put(MediaStore.Audio.Media.IS_PENDING, 0) }, null, null)
+            val lostMs = st.lostFrames * 1000 / st.rate
+            if (lostMs > 100 || st.resyncs > 0) notes.add("Link stem ${st.name} had ${lostMs} ms of dropouts (filled with silence).")
+        }
+        if (take.missing.isNotEmpty()) notes.add("No Link Audio arrived from: ${take.missing.joinToString(", ")}.")
+        return notes
     }
 
     /** The unmastered audio trimmed to the video, so it lines up at 0 in a DAW. */

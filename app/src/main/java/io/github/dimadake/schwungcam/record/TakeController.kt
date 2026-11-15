@@ -4,6 +4,7 @@ import io.github.dimadake.schwungcam.ai.AiRecorder
 import io.github.dimadake.schwungcam.ai.SurfaceSnapshot
 import io.github.dimadake.schwungcam.dsp.MasterSettings
 import io.github.dimadake.schwungcam.gl.RenderThread
+import io.github.dimadake.schwungcam.link.StemRecorder
 import io.github.dimadake.schwungcam.sync.ClockEnvelope
 import java.io.File
 import java.text.SimpleDateFormat
@@ -18,6 +19,7 @@ class TakeController(
     private val pcm: PcmRecorder,
     private val envelope: ClockEnvelope,
     private val finalizer: Finalizer,
+    private val stems: StemRecorder? = null,
     private val rate: Int = 44100,
 ) {
     private var enc: VideoEncoder? = null
@@ -31,7 +33,8 @@ class TakeController(
     fun onScreen(lum: ByteArray, stampNs: Long) { ai?.onScreen(lum, stampNs) }
     fun onSurface(s: SurfaceSnapshot, stampNs: Long) { ai?.onSurface(s, stampNs) }
 
-    fun start(width: Int, height: Int, bitrate: Int, aiTimeline: Boolean) {
+    /** [linkStems]: also record the picked Link Audio channels. */
+    fun start(width: Int, height: Int, bitrate: Int, aiTimeline: Boolean, linkStems: Boolean = false) {
         check(enc == null)
         name = "SchwungCam_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val d = File(cacheDir, "take-$name").apply { deleteRecursively(); mkdirs() }
@@ -41,6 +44,7 @@ class TakeController(
         pcm.start(WavWriter(File(d, "audio.wav"), rate))
         render.onFrameDrawn = { lastFrameNs = it }
         ai = if (aiTimeline) AiRecorder() else null
+        if (linkStems) stems?.startTake(d)
         render.setEncoder(e.inputSurface, width, height)
     }
 
@@ -62,9 +66,11 @@ class TakeController(
                 val video = e.finish() ?: error("no video frames were recorded")
                 waitForAudioTail()
                 val audio = pcm.stop()
-                finalizer.run(d, name, video, audio, envelope, master, keepWav, takeAi, progress)
+                waitForStemsTail()
+                val takeStems = stems?.stopTake()
+                finalizer.run(d, name, video, audio, envelope, master, keepWav, takeAi, takeStems, progress)
             }
-            if (res.isFailure) { pcm.stop(); d.deleteRecursively() }
+            if (res.isFailure) { pcm.stop(); stems?.stopTake(); d.deleteRecursively() }
             done(res)
         }
     }
@@ -76,6 +82,18 @@ class TakeController(
         while (System.currentTimeMillis() < deadline && !pcm.isEnded()) {
             val c = pcm.coveredPos() ?: return
             if (c >= targetPos) return
+            Thread.sleep(20)
+        }
+    }
+
+    /** Link buffers for the last frame arrive a network delay after it, as the stream's do. */
+    private fun waitForStemsTail() {
+        val s = stems ?: return
+        val target = lastFrameNs + TAIL_MS * 1_000_000L
+        val deadline = System.currentTimeMillis() + MAX_WAIT_MS
+        while (System.currentTimeMillis() < deadline) {
+            val c = s.coveredNs() ?: return
+            if (c >= target) return
             Thread.sleep(20)
         }
     }

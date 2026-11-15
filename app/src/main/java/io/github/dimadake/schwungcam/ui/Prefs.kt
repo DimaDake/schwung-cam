@@ -74,5 +74,15 @@ class Prefs(ctx: Context) {
         get() = p.getBoolean("ai", false)
         set(v) = p.edit().putBoolean("ai", v).apply()
 
+    /** Record the picked Link Audio channels as WAVs beside each take; off by default. */
+    var linkStems: Boolean
+        get() = p.getBoolean("link_stems", false)
+        set(v) = p.edit().putBoolean("link_stems", v).apply()
+
+    /** The picked channels, by [io.github.dimadake.schwungcam.link.LinkChannel.key]. */
+    var linkPicks: Set<String>
+        get() = p.getStringSet("link_picks", emptySet())!!.toSet()
+        set(v) = p.edit().putStringSet("link_picks", v).apply()
+
     fun master() = MasterSettings(enabled = masterOn, glue = glue, targetLufs = target.lufs)
 }

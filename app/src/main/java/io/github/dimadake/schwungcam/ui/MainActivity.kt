@@ -52,6 +52,9 @@ import io.github.dimadake.schwungcam.camera.CameraController
 import io.github.dimadake.schwungcam.gl.KeyMode
 import io.github.dimadake.schwungcam.gl.Overlay
 import io.github.dimadake.schwungcam.gl.RenderThread
+import io.github.dimadake.schwungcam.link.LinkChannel
+import io.github.dimadake.schwungcam.link.LinkNative
+import io.github.dimadake.schwungcam.link.StemRecorder
 import io.github.dimadake.schwungcam.record.FinalResult
 import io.github.dimadake.schwungcam.record.Finalizer
 import io.github.dimadake.schwungcam.record.PcmRecorder
@@ -74,6 +77,7 @@ class MainActivity : Activity() {
     private lateinit var stamper: ScreenStamper
     private lateinit var surfaceStamper: TickStamper<SurfaceSnapshot>
     private lateinit var takes: TakeController
+    private lateinit var stems: StemRecorder
 
     private var cameraTex: SurfaceTexture? = null
     private var choices: List<CameraChoice> = emptyList()
@@ -104,6 +108,9 @@ class MainActivity : Activity() {
     private lateinit var panel: ScrollView
     private lateinit var panelBody: LinearLayout
     private var hostField: EditText? = null
+    private var stemList: LinearLayout? = null
+    // what the stem list shows, so the 500 ms refresh rebuilds it only on a change
+    private var stemListShown: Any? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -145,7 +152,9 @@ class MainActivity : Activity() {
         outSize().let { (w, h) -> render.setOutput(w, h) }
         stamper = ScreenStamper(envelope) { render.pushScreen(it); takes.onScreen(it.lum, it.stampNs) }
         surfaceStamper = TickStamper(envelope) { s, ns -> takes.onSurface(s, ns) }
-        takes = TakeController(cacheDir, render, pcm, envelope, Finalizer(contentResolver))
+        stems = StemRecorder(openPort = { LinkNative.open() }, clockNs = { camera.clockNs() })
+        stems.picks = prefs.linkPicks
+        takes = TakeController(cacheDir, render, pcm, envelope, Finalizer(contentResolver), stems)
         stream = MoveStream(
             host = { prefs.host },
             clockNs = { camera.clockNs() },
@@ -328,6 +337,7 @@ class MainActivity : Activity() {
         applyHost()
         panel.visibility = View.GONE
         hostField = null
+        stemList = null; stemListShown = null
         updateChrome()
     }
 
@@ -370,6 +380,16 @@ class MainActivity : Activity() {
         b.addView(toggle(getString(R.string.keep_wav), prefs.keepWav) { prefs.keepWav = it })
         b.addView(toggle(getString(R.string.ai_timeline), prefs.aiTimeline) { prefs.aiTimeline = it })
 
+        b.addView(section(getString(R.string.link_stems)))
+        b.addView(toggle(getString(R.string.link_stems_on), prefs.linkStems) { on ->
+            prefs.linkStems = on
+            if (on) stems.start() else stems.stop()
+            stemListShown = null; fillStems()
+        })
+        stemList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        b.addView(stemList)
+        fillStems()
+
         b.addView(section(getString(R.string.host)))
         hostField = EditText(this).apply {
             setText(prefs.host); setSingleLine(); setTextColor(0xFFFFFFFF.toInt())
@@ -377,6 +397,33 @@ class MainActivity : Activity() {
             setOnEditorActionListener { _, a, _ -> if (a == EditorInfo.IME_ACTION_DONE) { applyHost(); clearFocus() }; false }
         }
         b.addView(hostField)
+    }
+
+    /**
+     * The session's channels as switches, plus picks that are not in it now
+     * (kept, so a pick survives the peer being off for a while).
+     */
+    private fun fillStems() {
+        val list = stemList ?: return
+        val picks = prefs.linkPicks
+        val present = stems.channels.distinctBy { it.key }
+        val shown = listOf(prefs.linkStems, stems.available, present.map { it.key }, picks)
+        if (shown == stemListShown) return
+        stemListShown = shown
+        list.removeAllViews()
+        if (!prefs.linkStems) return
+        if (!stems.available) { list.addView(label(getString(R.string.link_unavailable))); return }
+        if (present.isEmpty()) list.addView(label(getString(R.string.link_looking)))
+        val absent = picks.filter { k -> present.none { it.key == k } }.sorted()
+            .map { LinkChannel("", LinkChannel.peerOf(it), LinkChannel.nameOf(it)) }
+        for (c in present + absent) {
+            val text = "${c.name} · ${c.peer}" + if (c.id.isEmpty()) " (${getString(R.string.link_absent)})" else ""
+            list.addView(toggle(text, c.key in picks) { on ->
+                val p = if (on) prefs.linkPicks + c.key else prefs.linkPicks - c.key
+                prefs.linkPicks = p; stems.picks = p
+                stemListShown = listOf(prefs.linkStems, stems.available, present.map { it.key }, p)
+            })
+        }
     }
 
     private fun section(t: String) = TextView(this).apply {
@@ -422,7 +469,7 @@ class MainActivity : Activity() {
         closePanel()
         val (w, h) = outSize()
         try {
-            takes.start(w, h, prefs.resolution.bitrate, prefs.aiTimeline)
+            takes.start(w, h, prefs.resolution.bitrate, prefs.aiTimeline, prefs.linkStems)
         } catch (e: Exception) {
             Toast.makeText(this, "Cannot record: ${e.message}", Toast.LENGTH_LONG).show(); return
         }
@@ -502,7 +549,8 @@ class MainActivity : Activity() {
             StreamState.SCREEN_ONLY -> 0xFFFDD663.toInt() to "No audio · turn on Mirror Display"
             StreamState.LIVE -> 0xFF81C995.toInt() to "Move live"
         }
-        status.text = text
+        status.text = if (prefs.linkStems) "$text · ${linkStatus()}" else text
+        if (panel.visibility == View.VISIBLE) fillStems()
         statusDot.background.mutate().setTint(color)
         when {
             takes.recording -> {
@@ -515,6 +563,12 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun linkStatus() = when {
+        !stems.available -> "no Link"
+        stems.peers == 0 -> "Link: alone"
+        else -> "Link ${stems.subscribed.size}/${prefs.linkPicks.size} stems"
+    }
+
     // ---------------- lifecycle ----------------
 
     override fun onResume() {
@@ -524,6 +578,7 @@ class MainActivity : Activity() {
         wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_LOW_LATENCY, "schwungcam").apply { acquire() }
         mcLock = wm.createMulticastLock("schwungcam-mdns").apply { setReferenceCounted(false); acquire() }
         stream.start()
+        if (prefs.linkStems) stems.start()
         getSystemService(DisplayManager::class.java).registerDisplayListener(displayListener, ui)
         render.setDisplayRotation(displayDegrees())
         showLastTake(lastTakeUri)
@@ -543,6 +598,7 @@ class MainActivity : Activity() {
         closePanel()
         camera.close()
         stream.stop()
+        stems.stop()
         getSystemService(DisplayManager::class.java).unregisterDisplayListener(displayListener)
         wifiLock?.release(); wifiLock = null
         mcLock?.release(); mcLock = null
