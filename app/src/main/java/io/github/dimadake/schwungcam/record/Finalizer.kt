@@ -42,7 +42,12 @@ class Finalizer(private val resolver: ContentResolver, private val rate: Int = 4
 
         if (audio != null && audio.frames > 0) {
             val fromSec = audio.startPos.toDouble() / rate
-            val fit = envelope.fit(fromSec, fromSec + audio.frames.toDouble() / rate)
+            val raw = envelope.fit(fromSec, fromSec + audio.frames.toDouble() / rate)
+            val transit = if (raw != null && stems?.reference != null) measureTransit(wav, audio, raw, stems.reference) else null
+            if (raw != null && stems != null && transit == null)
+                warning = "Could not measure the Wi-Fi delay from Link, so the sound may sit ~40 ms late against the picture."
+            // the envelope traced offset + minimum transit: take the transit out, so the sound is on time
+            val fit = if (raw != null && transit != null) io.github.dimadake.schwungcam.sync.ClockFit(raw.a - transit, raw.b) else raw
             if (fit != null) {
                 val tl = Timeline(fit, video.firstFrameNs, rate)
                 timeline = tl
@@ -51,8 +56,9 @@ class Finalizer(private val resolver: ContentResolver, private val rate: Int = 4
                 report = Mastering.run(rate, master, { RangeReader(wav, skip, len) }, enc) { progress(it * 0.85f) }
                 enc.finish()
                 if (keepWav) saveWav(name, wav, skip, len)
-                if (audio.endedEarly) warning = "The Move restarted during the take; audio stops there."
-                else if (audio.gapFrames > rate / 10) warning = "Audio had ${audio.gapFrames * 1000 / rate} ms of dropouts (filled with silence)."
+                val w = if (audio.endedEarly) "The Move restarted during the take; audio stops there."
+                    else if (audio.gapFrames > rate / 10) "Audio had ${audio.gapFrames * 1000 / rate} ms of dropouts (filled with silence)." else null
+                if (w != null) warning = listOfNotNull(warning, w).joinToString("\n\n")
             }
         }
         if (timeline == null) warning = "No Schwung audio arrived; the video has no sound. Turn on Mirror Display in Schwung."
@@ -174,6 +180,23 @@ class Finalizer(private val resolver: ContentResolver, private val rate: Int = 4
         }
         if (take.missing.isNotEmpty()) notes.add("No Link Audio arrived from: ${take.missing.joinToString(", ")}.")
         return notes
+    }
+
+    /** Seconds the Mirror audio ran late, from the Link reference channel; null if it cannot tell. */
+    private fun measureTransit(wav: File, audio: TakeAudio, fit: io.github.dimadake.schwungcam.sync.ClockFit,
+                               ref: io.github.dimadake.schwungcam.link.StemCapture): Double? {
+        if (ref.rate != rate) return null
+        val anchorSec = ref.anchorNs / 1e9
+        val d = io.github.dimadake.schwungcam.sync.TransitMeter.measure(
+            mirror = { s, n -> io.github.dimadake.schwungcam.sync.TransitMeter.readMono(wav, s, n) },
+            ref = { s, n ->
+                val at = ((fit.phoneSec((audio.startPos + s).toDouble() / rate) - anchorSec) * rate).let { Math.round(it) }
+                io.github.dimadake.schwungcam.sync.TransitMeter.readMono(ref.file, at, n)
+            },
+            frames = audio.frames, rate = rate,
+        )
+        Log.i("SchwungCam", "transit from ${ref.peer}/${ref.name}: " + (d?.let { "%.1f ms".format(it * 1000) } ?: "not measured"))
+        return d
     }
 
     /** What a stem's timing did, in words; nothing for a clean one. */

@@ -12,8 +12,12 @@ class StemCapture(
     val gapFrames: Long = 0, val droppedFrames: Long = 0,
 )
 
-/** [missing]: picked channels that gave no audio although their peer was in the session. */
-class StemsTake(val stems: List<StemCapture>, val missing: List<String>)
+/**
+ * [missing]: picked channels that gave no audio although their peer was in the
+ * session. [reference]: the whole-mix channel recorded to measure the Mirror
+ * stream's delay (TransitMeter), picked or not.
+ */
+class StemsTake(val stems: List<StemCapture>, val missing: List<String>, val reference: StemCapture? = null)
 
 /**
  * Link Audio stems while the viewfinder is open and the setting is on: keeps
@@ -44,7 +48,7 @@ class StemRecorder(
     private val preRollFrames = HashMap<String, Long>()
     private var take: Take? = null
 
-    private class Take(val dir: File, val picks: Set<String>) {
+    private class Take(val dir: File, val picks: Set<String>, val refKey: String?) {
         val lanes = LinkedHashMap<String, StemLane>()
         val files = HashMap<String, File>()
         /** Peers seen during the take: a pick whose peer never was (movy closed) is no news. */
@@ -66,7 +70,7 @@ class StemRecorder(
     }
 
     fun startTake(dir: File) = synchronized(lock) {
-        val t = Take(dir, picks)
+        val t = Take(dir, picks, reference(channels)?.key)
         t.peersSeen.addAll(channels.map { it.peer })
         take = t
         for ((key, q) in preRoll) for (b in q) laneFor(t, key)?.add(b)
@@ -79,18 +83,21 @@ class StemRecorder(
         val t = take ?: return null
         take = null
         val out = ArrayList<StemCapture>()
+        var ref: StemCapture? = null
         for ((key, lane) in t.lanes) {
             lane.finish()?.close()
             val a = lane.anchorNs() ?: continue
-            out.add(StemCapture(LinkChannel.peerOf(key), LinkChannel.nameOf(key), t.files[key]!!, lane.rate, a,
-                lane.frames, lane.lostFrames, lane.resyncs, lane.gapFrames, lane.droppedFrames))
+            val c = StemCapture(LinkChannel.peerOf(key), LinkChannel.nameOf(key), t.files[key]!!, lane.rate, a,
+                lane.frames, lane.lostFrames, lane.resyncs, lane.gapFrames, lane.droppedFrames)
+            if (key == t.refKey) ref = c
+            if (key in t.picks) out.add(c)
         }
         val got = out.map { LinkChannel.keyOf(it.peer, it.name) }.toSet()
-        StemsTake(out, t.picks.filter { it !in got && LinkChannel.peerOf(it) in t.peersSeen }.map(LinkChannel::nameOf).sorted())
+        StemsTake(out, t.picks.filter { it !in got && LinkChannel.peerOf(it) in t.peersSeen }.map(LinkChannel::nameOf).sorted(), ref)
     }
 
     private fun laneFor(t: Take, key: String): StemLane? {
-        if (key !in t.picks) return null
+        if (key !in t.picks && key != t.refKey) return null
         return t.lanes.getOrPut(key) {
             val f = File(t.dir, "stem-${t.lanes.size}.wav")
             t.files[key] = f
@@ -117,11 +124,12 @@ class StemRecorder(
                     val ch = port.channels()
                     channels = ch; peers = port.peers()
                     synchronized(lock) { take?.peersSeen?.addAll(ch.map { it.peer }) }
-                    val want = ch.filter { it.key in picks }
+                    val ref = reference(ch)
+                    val want = ch.filter { it.key in picks || it == ref }
                     val got = port.subscribe(want.map { it.id }).toSet()
                     ids = want.filter { it.id in got }.associate { it.id to it.key }
-                    subscribed = ids.values.toSet()
-                    synchronized(lock) { preRoll.keys.retainAll(subscribed); preRollFrames.keys.retainAll(subscribed) }
+                    subscribed = ids.values.filter { it in picks }.toSet()
+                    synchronized(lock) { preRoll.keys.retainAll(ids.values.toSet()); preRollFrames.keys.retainAll(ids.values.toSet()) }
                 }
                 // read the two clocks back to back each pass, so slew between them never adds up
                 val c0 = clockNs(); val u = port.nowUs(); val c1 = clockNs()
@@ -166,6 +174,15 @@ class StemRecorder(
     private fun log(msg: String) { try { android.util.Log.i("SchwungCam", msg) } catch (e: Throwable) {} }
 
     companion object {
+        /**
+         * The channel that carries the same mix as the Mirror stream: Movy
+         * Master, else the Move's Main (its peer is named after its hostname:
+         * Move, Move3, …). Never Live's Main, which is not the Move's sound.
+         */
+        fun reference(ch: List<LinkChannel>): LinkChannel? =
+            ch.firstOrNull { it.peer == "Movy" && it.name == "Movy Master" }
+                ?: ch.firstOrNull { it.name == "Main" && it.peer.startsWith("Move", ignoreCase = true) }
+
         const val PRE_ROLL_SEC = 2
         const val PASS_MS = 20L
         const val LIST_MS = 500L
