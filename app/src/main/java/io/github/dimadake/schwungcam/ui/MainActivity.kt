@@ -153,6 +153,7 @@ class MainActivity : Activity() {
         stamper = ScreenStamper(envelope) { render.pushScreen(it); takes.onScreen(it.lum, it.stampNs) }
         surfaceStamper = TickStamper(envelope) { s, ns -> takes.onSurface(s, ns) }
         stems = StemRecorder(openPort = { LinkNative.open() }, clockNs = { camera.clockNs() })
+        LinkChannel.migratePicks(prefs.linkPicks).let { if (it != prefs.linkPicks) prefs.linkPicks = it }
         stems.picks = prefs.linkPicks
         takes = TakeController(cacheDir, render, pcm, envelope, Finalizer(contentResolver), stems)
         stream = MoveStream(

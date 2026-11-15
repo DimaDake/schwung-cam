@@ -120,6 +120,14 @@ class StemsTest {
         assertEquals(listOf("9-Audio", "10-Audio", "Main", "Movy 1", "Movy 2", "Movy 11", "Movy Master"), ch)
     }
 
+    @Test fun `picks saved under movy's old names move to the padded ones`() {
+        val k = { p: String, n: String -> LinkChannel.keyOf(p, n) }
+        val old = setOf(k("Movy", "Movy 1"), k("Movy", "Movy 01"), k("Movy", "Movy 9"), k("Movy", "Movy 12"),
+            k("Movy", "Movy Send 1"), k("Live", "Movy 2"), k("Move", "1-MIDI"))
+        assertEquals(setOf(k("Movy", "Movy 01"), k("Movy", "Movy 09"), k("Movy", "Movy 12"),
+            k("Movy", "Movy Send 1"), k("Live", "Movy 2"), k("Move", "1-MIDI")), LinkChannel.migratePicks(old))
+    }
+
     // ---------------- export ----------------
 
     @Test fun `range puts the stem's first frame at its time in the video`() {

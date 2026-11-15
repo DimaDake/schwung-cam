@@ -10,6 +10,15 @@ data class LinkChannel(val id: String, val peer: String, val name: String) {
         fun peerOf(key: String) = key.substringBefore('\t')
         fun nameOf(key: String) = key.substringAfter('\t')
 
+        /**
+         * Picks saved before movy padded its track names (8f3e377a: Movy 1 →
+         * Movy 01) under the names movy announces now; a pick made twice is kept once.
+         */
+        fun migratePicks(picks: Set<String>): Set<String> = picks.map { k ->
+            val m = Regex("^Movy\tMovy ([1-9])$").find(k)
+            if (m != null) keyOf("Movy", "Movy 0" + m.groupValues[1]) else k
+        }.toSet()
+
         /** Numbers compare as numbers, so "10-Audio" follows "9-Audio", not "1-Audio". */
         val natural: Comparator<String> = Comparator { a, b ->
             val ta = Regex("\\d+|\\D+").findAll(a).map { it.value }.toList()
