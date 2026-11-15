@@ -213,10 +213,11 @@ class StemsTest {
         while (!cond()) { check(System.currentTimeMillis() < until) { "timed out: $what" }; Thread.sleep(5) }
     }
 
-    @Test fun `the recorder keeps a pre-roll, records picks only and names the absent`() {
+    @Test fun `the recorder keeps a pre-roll, records picks only and names what its peer lacked`() {
         val port = FakePort(listOf(LinkChannel("a", "Movy", "Movy 1"), LinkChannel("b", "Movy", "Movy 2")))
         val rec = StemRecorder(openPort = { port }, clockNs = { 0L })
-        rec.picks = setOf(LinkChannel.keyOf("Movy", "Movy 1"), LinkChannel.keyOf("Live", "Main"))
+        // Movy 3: Movy is here but that channel is not (news); Live: not in the session at all (no news)
+        rec.picks = setOf(LinkChannel.keyOf("Movy", "Movy 1"), LinkChannel.keyOf("Movy", "Movy 3"), LinkChannel.keyOf("Live", "Main"))
         rec.start()
         waitFor("subscribed") { port.subs == listOf("a") }
         for (c in 0L until 5) port.push("a", c)
@@ -232,7 +233,7 @@ class StemsTest {
         assertEquals(1, t.stems.size)
         val s = t.stems[0]
         assertEquals("Movy 1", s.name); assertEquals(80L, s.frames); assertEquals(0L, s.anchorNs)
-        assertEquals(listOf("Main"), t.missing)
+        assertEquals(listOf("Movy 3"), t.missing)
         // header + 80 stereo int16 frames, block 0's samples first
         assertEquals(44L + 80 * 4, s.file.length())
         assertEquals(1, ByteBuffer.wrap(s.file.readBytes(), 44, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt())

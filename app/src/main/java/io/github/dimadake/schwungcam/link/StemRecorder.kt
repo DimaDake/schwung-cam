@@ -12,7 +12,7 @@ class StemCapture(
     val gapFrames: Long = 0, val droppedFrames: Long = 0,
 )
 
-/** [missing]: picked channels that gave no audio during the take. */
+/** [missing]: picked channels that gave no audio although their peer was in the session. */
 class StemsTake(val stems: List<StemCapture>, val missing: List<String>)
 
 /**
@@ -47,6 +47,8 @@ class StemRecorder(
     private class Take(val dir: File, val picks: Set<String>) {
         val lanes = LinkedHashMap<String, StemLane>()
         val files = HashMap<String, File>()
+        /** Peers seen during the take: a pick whose peer never was (movy closed) is no news. */
+        val peersSeen = HashSet<String>()
     }
 
     fun start() {
@@ -65,6 +67,7 @@ class StemRecorder(
 
     fun startTake(dir: File) = synchronized(lock) {
         val t = Take(dir, picks)
+        t.peersSeen.addAll(channels.map { it.peer })
         take = t
         for ((key, q) in preRoll) for (b in q) laneFor(t, key)?.add(b)
     }
@@ -83,7 +86,7 @@ class StemRecorder(
                 lane.frames, lane.lostFrames, lane.resyncs, lane.gapFrames, lane.droppedFrames))
         }
         val got = out.map { LinkChannel.keyOf(it.peer, it.name) }.toSet()
-        StemsTake(out, t.picks.filter { it !in got }.map(LinkChannel::nameOf).sorted())
+        StemsTake(out, t.picks.filter { it !in got && LinkChannel.peerOf(it) in t.peersSeen }.map(LinkChannel::nameOf).sorted())
     }
 
     private fun laneFor(t: Take, key: String): StemLane? {
@@ -113,6 +116,7 @@ class StemRecorder(
                     lastList = now
                     val ch = port.channels()
                     channels = ch; peers = port.peers()
+                    synchronized(lock) { take?.peersSeen?.addAll(ch.map { it.peer }) }
                     val want = ch.filter { it.key in picks }
                     val got = port.subscribe(want.map { it.id }).toSet()
                     ids = want.filter { it.id in got }.associate { it.id to it.key }
