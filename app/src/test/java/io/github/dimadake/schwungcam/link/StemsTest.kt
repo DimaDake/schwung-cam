@@ -29,7 +29,7 @@ class StemsTest {
     private fun block(count: Long, n: Int = 10, at: Long = count * n, jitterMs: Long = 0, t0: Long = 5000 * ms) =
         StemBlock(count, rate, t0 + at * ms + jitterMs * ms, ShortArray(n * 2) { (at + it / 2 + 1).toShort() }, n)
 
-    private fun lane(): Pair<StemLane, MemSink> { val s = MemSink(); return StemLane { s } to s }
+    private fun lane(): Pair<StemLane, MemSink> { val s = MemSink(); return StemLane({ s }) to s }
 
     @Test fun `buffers lay end to end and the anchor ignores one jittered stamp`() {
         val (l, s) = lane()
@@ -60,23 +60,42 @@ class StemsTest {
 
     @Test fun `a long hole re-anchors on the stamp`() {
         val (l, s) = lane()
-        l.add(block(0)); l.add(block(1))
+        for (c in 0L until 20) l.add(block(c))
         // the sender stalled 500 ms and lost 50 buffers
-        l.add(block(52)); l.add(block(53))
+        l.add(block(70)); l.add(block(71))
         l.finish()
-        assertEquals(540, s.frames.size)
-        assertEquals((1..20).toList() + List(500) { 0 } + (521..540).toList(), s.frames)
-        assertEquals(1, l.resyncs)
+        assertEquals((1..200).toList() + List(500) { 0 } + (701..720).toList(), s.frames)
+        assertEquals(1, l.resyncs); assertEquals(500L, l.gapFrames)
     }
 
     @Test fun `a stamp running behind its place drops the overlap`() {
         val (l, s) = lane()
-        l.add(block(0)); l.add(block(1)); l.add(block(2))
+        for (c in 0L until 20) l.add(block(c))
         // a buffer far ahead by count whose stamp is 25 frames behind its place
-        l.add(StemBlock(100, rate, 5000 * ms + 5 * ms, ShortArray(60) { 7 }, 30))
+        l.add(StemBlock(100, rate, 5000 * ms + 175 * ms, ShortArray(60) { 7 }, 30))
         l.finish()
-        // 30 placed, then the new block's first 25 frames already have audio
-        assertEquals((1..30).toList() + List(5) { 7 }, s.frames)
+        assertEquals((1..200).toList() + List(5) { 7 }, s.frames)
+        assertEquals(25L, l.droppedFrames)
+    }
+
+    @Test fun `an odd first stamp does not make the rest look wrong`() {
+        val resyncs = ArrayList<Long>()
+        val s = MemSink()
+        val l = StemLane({ s }) { _, c -> resyncs.add(c) }
+        for (c in 0L until 40) l.add(block(c, jitterMs = if (c == 0L) 30 else 0))
+        l.finish()
+        assertEquals(emptyList<Long>(), resyncs)
+        assertEquals((1..400).toList(), s.frames)
+        assertEquals(5000 * ms, l.anchorNs())
+    }
+
+    @Test fun `re-alignment is counted as silence added and overlap removed`() {
+        val (l, _) = lane()
+        for (c in 0L until 20) l.add(block(c))
+        l.add(block(20, at = 230))            // 30 frames late: 30 of silence
+        l.add(block(21, at = 215))            // 25 frames behind the 240 placed so far: all 10 dropped
+        l.finish()
+        assertEquals(2, l.resyncs); assertEquals(30L, l.gapFrames); assertEquals(10L, l.droppedFrames)
     }
 
     @Test fun `other session and wrong rate buffers are ignored`() {

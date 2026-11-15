@@ -17,13 +17,19 @@ class StemBlock(val count: Long, val rate: Int, val stampNs: Long, val pcm: Shor
  * sample clock is the stem's timeline, never resampled. A stamp only decides
  * where the stem starts ([anchorNs], the median over its first seconds, so a
  * jittered stamp cannot move it) and catches a discontinuity: a stamp more
- * than [RESYNC_MS] from its place inserts silence or drops the overlap.
+ * than [RESYNC_MS] from its place inserts silence or drops the overlap. Stamps
+ * are judged only once [SETTLE] buffers have set the reference, so an odd FIRST
+ * stamp cannot make every buffer after it look wrong.
  *
  * Link Audio buffers can arrive out of order, so up to [HOLD] are held to be
  * put back by sequence number; a gap still open after that is a LOST buffer,
  * filled with silence its length so everything after keeps its place.
  */
-class StemLane(private val sinkFor: (rate: Int) -> PcmSink) {
+class StemLane(
+    private val sinkFor: (rate: Int) -> PcmSink,
+    /** A re-alignment: how far the stamp was from its place (ms, + = late) and the buffer's count. */
+    private val onResync: (errMs: Double, count: Long) -> Unit = { _, _ -> },
+) {
     private var sink: PcmSink? = null
     var rate = 0; private set
     private var expected = -1L
@@ -35,6 +41,11 @@ class StemLane(private val sinkFor: (rate: Int) -> PcmSink) {
     private val offsets = ArrayList<Long>()
     var lostFrames = 0L; private set
     var resyncs = 0; private set
+    /** Silence a late stamp put in, and audio an early one took out. */
+    var gapFrames = 0L; private set
+    var droppedFrames = 0L; private set
+    /** Where stamps are judged from: settled on the median of the first [SETTLE] buffers, never on one. */
+    private var refNs: Long? = null
 
     fun add(b: StemBlock) {
         if (b.stampNs == StemBlock.NO_STAMP || b.frames <= 0) return
@@ -81,15 +92,21 @@ class StemLane(private val sinkFor: (rate: Int) -> PcmSink) {
 
     private fun place(b: StemBlock) {
         if (sink == null) { sink = sinkFor(rate); originNs = b.stampNs }
-        val err = b.stampNs - placeNs()
+        if (refNs == null && offsets.size >= SETTLE) refNs = anchorNs()
         var off = 0
-        if (err > RESYNC_MS * 1_000_000L) {
-            silence((err * rate / 1e9).roundToLong()); resyncs++
-        } else if (err < -RESYNC_MS * 1_000_000L) {
-            resyncs++
-            val drop = (-err * rate / 1e9).roundToLong()
-            if (drop >= b.frames) return
-            off = drop.toInt()
+        val ref = refNs
+        if (ref != null) {
+            val err = b.stampNs - (ref + (frames * 1e9 / rate).roundToLong())
+            if (err > RESYNC_MS * 1_000_000L) {
+                val n = (err * rate / 1e9).roundToLong()
+                silence(n); gapFrames += n; resyncs++; onResync(err / 1e6, b.count)
+            } else if (err < -RESYNC_MS * 1_000_000L) {
+                resyncs++; onResync(err / 1e6, b.count)
+                val drop = (-err * rate / 1e9).roundToLong()
+                droppedFrames += minOf(drop, b.frames.toLong())
+                if (drop >= b.frames) return
+                off = drop.toInt()
+            }
         }
         if (frames < ANCHOR_SEC * rate) offsets.add(b.stampNs + (off * 1e9 / rate).roundToLong() - placeNs())
         sink!!.write(b.pcm, off, b.frames - off)
@@ -107,5 +124,6 @@ class StemLane(private val sinkFor: (rate: Int) -> PcmSink) {
         const val HOLD = 8
         const val RESTART_BLOCKS = 64
         const val ANCHOR_SEC = 2
+        const val SETTLE = 16
     }
 }

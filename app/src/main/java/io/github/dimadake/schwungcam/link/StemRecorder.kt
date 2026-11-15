@@ -9,6 +9,7 @@ class StemCapture(
     /** Camera time of the file's first frame. */
     val anchorNs: Long,
     val frames: Long, val lostFrames: Long, val resyncs: Int,
+    val gapFrames: Long = 0, val droppedFrames: Long = 0,
 )
 
 /** [missing]: picked channels that gave no audio during the take. */
@@ -79,7 +80,7 @@ class StemRecorder(
             lane.finish()?.close()
             val a = lane.anchorNs() ?: continue
             out.add(StemCapture(LinkChannel.peerOf(key), LinkChannel.nameOf(key), t.files[key]!!, lane.rate, a,
-                lane.frames, lane.lostFrames, lane.resyncs))
+                lane.frames, lane.lostFrames, lane.resyncs, lane.gapFrames, lane.droppedFrames))
         }
         val got = out.map { LinkChannel.keyOf(it.peer, it.name) }.toSet()
         StemsTake(out, t.picks.filter { it !in got }.map(LinkChannel::nameOf).sorted())
@@ -90,7 +91,9 @@ class StemRecorder(
         return t.lanes.getOrPut(key) {
             val f = File(t.dir, "stem-${t.lanes.size}.wav")
             t.files[key] = f
-            StemLane { rate -> WavWriter(f, rate) }
+            StemLane({ rate -> WavWriter(f, rate) }) { errMs, count ->
+                log("stem ${LinkChannel.nameOf(key)}: buffer $count stamped %+.1f ms from its place; re-aligned".format(errMs))
+            }
         }
     }
 
@@ -155,6 +158,8 @@ class StemRecorder(
         while (q.size > 1 && total - q.first().frames >= PRE_ROLL_SEC * b.rate) total -= q.removeFirst().frames
         preRollFrames[key] = total
     }
+
+    private fun log(msg: String) { try { android.util.Log.i("SchwungCam", msg) } catch (e: Throwable) {} }
 
     companion object {
         const val PRE_ROLL_SEC = 2

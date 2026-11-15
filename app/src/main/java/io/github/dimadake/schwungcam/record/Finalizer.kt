@@ -170,11 +170,25 @@ class Finalizer(private val resolver: ContentResolver, private val rate: Int = 4
                 resolver.delete(uri, null, null); throw e
             }
             resolver.update(uri, ContentValues().apply { put(MediaStore.Audio.Media.IS_PENDING, 0) }, null, null)
-            val lostMs = st.lostFrames * 1000 / st.rate
-            if (lostMs > 100 || st.resyncs > 0) notes.add("Link stem ${st.name} had ${lostMs} ms of dropouts (filled with silence).")
+            notes.addAll(stemNotes(st))
         }
         if (take.missing.isNotEmpty()) notes.add("No Link Audio arrived from: ${take.missing.joinToString(", ")}.")
         return notes
+    }
+
+    /** What a stem's timing did, in words; nothing for a clean one. */
+    internal fun stemNotes(st: io.github.dimadake.schwungcam.link.StemCapture): List<String> {
+        val ms = { f: Long -> f * 1000 / st.rate }
+        val parts = ArrayList<String>()
+        if (ms(st.lostFrames) >= 10) parts.add("${ms(st.lostFrames)} ms of lost audio filled with silence")
+        if (st.resyncs > 0) {
+            val how = listOfNotNull(
+                ms(st.gapFrames).takeIf { it > 0 }?.let { "$it ms of silence added" },
+                ms(st.droppedFrames).takeIf { it > 0 }?.let { "$it ms of overlap removed" },
+            ).joinToString(", ")
+            parts.add("its timing jumped ${st.resyncs}×" + if (how.isEmpty()) "" else " ($how)")
+        }
+        return if (parts.isEmpty()) emptyList() else listOf("Link stem ${st.name}: ${parts.joinToString("; ")}.")
     }
 
     /** The unmastered audio trimmed to the video, so it lines up at 0 in a DAW. */
