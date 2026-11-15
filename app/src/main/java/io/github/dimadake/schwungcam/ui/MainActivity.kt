@@ -406,7 +406,7 @@ class MainActivity : Activity() {
     private fun fillStems() {
         val list = stemList ?: return
         val picks = prefs.linkPicks
-        val present = stems.channels.distinctBy { it.key }
+        val present = stems.channels.distinctBy { it.key }.sortedWith(LinkChannel.order)
         val shown = listOf(prefs.linkStems, stems.available, present.map { it.key }, picks)
         if (shown == stemListShown) return
         stemListShown = shown
@@ -414,8 +414,8 @@ class MainActivity : Activity() {
         if (!prefs.linkStems) return
         if (!stems.available) { list.addView(label(getString(R.string.link_unavailable))); return }
         if (present.isEmpty()) list.addView(label(getString(R.string.link_looking)))
-        val absent = picks.filter { k -> present.none { it.key == k } }.sorted()
-            .map { LinkChannel("", LinkChannel.peerOf(it), LinkChannel.nameOf(it)) }
+        val absent = picks.filter { k -> present.none { it.key == k } }
+            .map { LinkChannel("", LinkChannel.peerOf(it), LinkChannel.nameOf(it)) }.sortedWith(LinkChannel.order)
         for (c in present + absent) {
             val text = "${c.name} · ${c.peer}" + if (c.id.isEmpty()) " (${getString(R.string.link_absent)})" else ""
             list.addView(toggle(text, c.key in picks) { on ->

@@ -9,6 +9,22 @@ data class LinkChannel(val id: String, val peer: String, val name: String) {
         fun keyOf(peer: String, name: String) = "$peer\t$name"
         fun peerOf(key: String) = key.substringBefore('\t')
         fun nameOf(key: String) = key.substringAfter('\t')
+
+        /** Numbers compare as numbers, so "10-Audio" follows "9-Audio", not "1-Audio". */
+        val natural: Comparator<String> = Comparator { a, b ->
+            val ta = Regex("\\d+|\\D+").findAll(a).map { it.value }.toList()
+            val tb = Regex("\\d+|\\D+").findAll(b).map { it.value }.toList()
+            for (i in 0 until minOf(ta.size, tb.size)) {
+                val x = ta[i]; val y = tb[i]
+                val c = if (x[0].isDigit() && y[0].isDigit()) x.toBigInteger().compareTo(y.toBigInteger()).let { if (it != 0) it else x.length - y.length }
+                else x.compareTo(y, ignoreCase = true)
+                if (c != 0) return@Comparator c
+            }
+            ta.size - tb.size
+        }
+
+        /** The picker's order: by peer, then by name with numbers in order. */
+        val order: Comparator<LinkChannel> = compareBy<LinkChannel, String>(natural) { it.peer }.thenBy(natural) { it.name }
     }
 }
 

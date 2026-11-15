@@ -94,6 +94,13 @@ class StemsTest {
         assertNull(l.finish()); assertNull(l.anchorNs()); assertNull(l.coveredNs())
     }
 
+    @Test fun `the picker lists channels with numbers in order`() {
+        val ch = listOf("Movy" to "Movy 11", "Live" to "10-Audio", "Movy" to "Movy 2", "Live" to "9-Audio",
+            "Movy" to "Movy Master", "Live" to "Main", "Movy" to "Movy 1")
+            .map { (p, n) -> LinkChannel(n, p, n) }.sortedWith(LinkChannel.order).map { it.name }
+        assertEquals(listOf("9-Audio", "10-Audio", "Main", "Movy 1", "Movy 2", "Movy 11", "Movy Master"), ch)
+    }
+
     // ---------------- export ----------------
 
     @Test fun `range puts the stem's first frame at its time in the video`() {
