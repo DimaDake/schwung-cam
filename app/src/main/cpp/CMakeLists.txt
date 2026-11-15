@@ -14,3 +14,5 @@ target_include_directories(schwungcam_link PRIVATE
     ${LINK_DIR}/include
     ${LINK_DIR}/modules/asio-standalone/asio/include)
 target_link_libraries(schwungcam_link log)
+# 16 KB page devices refuse (or warn on) a library whose LOAD segments are 4 KB aligned
+target_link_options(schwungcam_link PRIVATE "-Wl,-z,max-page-size=16384")

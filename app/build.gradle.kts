@@ -15,6 +15,8 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         ndk { abiFilters += listOf("arm64-v8a") }
+        // 16 KB pages (Android 15+ devices): NDK 27 still links at 4 KB by default
+        externalNativeBuild { cmake { arguments += "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON" } }
     }
 
     // the Link SDK (GPL-2.0-or-later) for Link Audio stems
