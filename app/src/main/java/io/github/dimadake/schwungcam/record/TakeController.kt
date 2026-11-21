@@ -70,8 +70,15 @@ class TakeController(
                 val takeStems = stems?.stopTake()
                 finalizer.run(d, name, video, audio, envelope, master, keepWav, takeAi, takeStems, progress)
             }
-            if (res.isFailure) { pcm.stop(); stems?.stopTake(); d.deleteRecursively() }
-            done(res)
+            if (res.isFailure) {
+                pcm.stop(); stems?.stopTake()
+                val saved = finalizer.rescue(d, name)
+                d.deleteRecursively()
+                val e = res.exceptionOrNull()!!
+                val msg = (e.message ?: e.toString()) + if (saved.isEmpty()) "" else
+                    "\n\nThe take as recorded (unsynced, unmastered) is in:\n" + saved.joinToString("\n")
+                done(Result.failure(RuntimeException(msg, e)))
+            } else done(res)
         }
     }
 

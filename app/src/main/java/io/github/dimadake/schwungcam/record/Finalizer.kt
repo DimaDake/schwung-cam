@@ -48,32 +48,18 @@ class Finalizer(private val resolver: ContentResolver, private val rate: Int = 4
                 warning = "Could not measure the Wi-Fi delay from Link, so the sound may sit ~40 ms late against the picture."
             // the envelope traced offset + minimum transit: take the transit out, so the sound is on time
             val fit = if (raw != null && transit != null) io.github.dimadake.schwungcam.sync.ClockFit(raw.a - transit, raw.b) else raw
-            if (fit != null) {
-                val tl = Timeline(fit, video.firstFrameNs, rate)
-                timeline = tl
-                val (skip, len) = tl.audioRange(audio.startPos, video.lastPtsUs + FRAME_US)
-                val enc = AacEncoder(m4a, rate)
-                report = Mastering.run(rate, master, { RangeReader(wav, skip, len) }, enc) { progress(it * 0.85f) }
-                enc.finish()
-                if (keepWav) saveWav(name, wav, skip, len)
-                val w = if (audio.endedEarly) "The Move restarted during the take; audio stops there."
-                    else if (audio.gapFrames > rate / 10) "Audio had ${audio.gapFrames * 1000 / rate} ms of dropouts (filled with silence)." else null
-                if (w != null) warning = listOfNotNull(warning, w).joinToString("\n\n")
-            }
+            if (fit != null) timeline = Timeline(fit, video.firstFrameNs, rate)
         }
         if (timeline == null) warning = "No Schwung audio arrived; the video has no sound. Turn on Mirror Display in Schwung."
 
-        val uri = insertVideo(name)
-        resolver.openFileDescriptor(uri, "rw")!!.use { pfd ->
-            remux(videoFile, if (timeline != null) m4a else null, timeline, MediaMuxer(pfd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4))
-        }
-        resolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
         // camera time → seconds into the video, on the same clock the frames were placed by
         val tl = timeline
         val toSec: (Long) -> Double = if (tl != null) { ns -> (tl.posAt(ns) - tl.p0) / rate } else { ns -> (ns - video.firstFrameNs) / 1e9 }
         val durationSec = (video.lastPtsUs + FRAME_US) / 1e6
+        // the timeline and stems live only in memory, and mastering a long take takes
+        // minutes: save them first, so they survive the app being closed meanwhile
         if (ai != null) {
-            // the video is already safe; a failed timeline costs only itself
+            // a failed timeline costs only itself
             try {
                 saveAi(name, durationSec, ai, toSec)
             } catch (e: Exception) {
@@ -90,9 +76,61 @@ class Finalizer(private val resolver: ContentResolver, private val rate: Int = 4
             }
             if (notes.isNotEmpty()) warning = (listOfNotNull(warning) + notes).joinToString("\n\n")
         }
+
+        if (audio != null && tl != null) {
+            val (skip, len) = tl.audioRange(audio.startPos, video.lastPtsUs + FRAME_US)
+            if (keepWav) saveWav(name, wav, skip, len)
+            val enc = AacEncoder(m4a, rate)
+            report = Mastering.run(rate, master, { RangeReader(wav, skip, len) }, enc, frames = len) { progress(it * 0.85f) }
+            enc.finish()
+            val w = if (audio.endedEarly) "The Move restarted during the take; audio stops there."
+                else if (audio.gapFrames > rate / 10) "Audio had ${audio.gapFrames * 1000 / rate} ms of dropouts (filled with silence)." else null
+            if (w != null) warning = listOfNotNull(warning, w).joinToString("\n\n")
+        }
+
+        val uri = insertVideo(name)
+        resolver.openFileDescriptor(uri, "rw")!!.use { pfd ->
+            remux(videoFile, if (tl != null) m4a else null, tl, MediaMuxer(pfd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4))
+        }
+        resolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
         progress(1f)
         dir.deleteRecursively()
         return FinalResult(uri, name, report, warning)
+    }
+
+    /**
+     * When finishing failed: the camera's video and the stream's audio as they
+     * were recorded, unsynced and unmastered, so the take is not lost with the
+     * cache. Best effort; returns what was saved.
+     */
+    fun rescue(dir: File, name: String): List<String> {
+        val saved = ArrayList<String>()
+        val video = File(dir, "video.mp4")
+        if (video.length() > 0 && copyOut(video, "${name}_raw.mp4", "video/mp4", "Movies/SchwungCam", MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)))
+            saved.add("Movies/SchwungCam/${name}_raw.mp4")
+        val wav = File(dir, "audio.wav")
+        if (wav.length() > 44 && copyOut(wav, "${name}_raw.wav", "audio/wav", "Music/SchwungCam", MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)))
+            saved.add("Music/SchwungCam/${name}_raw.wav")
+        return saved
+    }
+
+    private fun copyOut(src: File, display: String, mime: String, relPath: String, collection: Uri): Boolean = try {
+        val v = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, display)
+            put(MediaStore.MediaColumns.MIME_TYPE, mime)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, relPath)
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(collection, v) ?: error("MediaStore refused $display")
+        try {
+            resolver.openOutputStream(uri)!!.use { out -> src.inputStream().use { it.copyTo(out, 1 shl 20) } }
+        } catch (e: Exception) {
+            resolver.delete(uri, null, null); throw e
+        }
+        resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+        true
+    } catch (e: Exception) {
+        Log.w("SchwungCam", "rescue $display", e); false
     }
 
     private fun remux(videoFile: File, audioFile: File?, tl: Timeline?, mux: MediaMuxer) {

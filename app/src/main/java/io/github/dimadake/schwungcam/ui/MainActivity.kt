@@ -56,6 +56,7 @@ import io.github.dimadake.schwungcam.link.LinkChannel
 import io.github.dimadake.schwungcam.link.LinkNative
 import io.github.dimadake.schwungcam.link.StemRecorder
 import io.github.dimadake.schwungcam.record.FinalResult
+import io.github.dimadake.schwungcam.record.FinalizeService
 import io.github.dimadake.schwungcam.record.Finalizer
 import io.github.dimadake.schwungcam.record.PcmRecorder
 import io.github.dimadake.schwungcam.record.TakeController
@@ -486,8 +487,13 @@ class MainActivity : Activity() {
         finalizeProgress = 0f
         shutter.progress = 0f
         updateChrome(); updateStatus()
-        takes.stop(prefs.master(), prefs.keepWav, progress = { p -> ui.post { finalizeProgress = p; shutter.progress = p; updateStatus() } }) { res ->
+        // the finalize thread outlives this activity: the service keeps the process up
+        val app = applicationContext
+        FinalizeService.begin(app)
+        takes.stop(prefs.master(), prefs.keepWav, progress = { p -> FinalizeService.progress(app, p); ui.post { finalizeProgress = p; shutter.progress = p; updateStatus() } }) { res ->
+            FinalizeService.end(app, res)
             ui.post {
+                if (isDestroyed) return@post
                 finalizing = false
                 shutter.progress = null
                 requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
@@ -574,6 +580,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        FinalizeService.visible = true
         val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         // power-save batching would add delay to the stream that the envelope must then reject
         wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_LOW_LATENCY, "schwungcam").apply { acquire() }
@@ -583,18 +590,22 @@ class MainActivity : Activity() {
         getSystemService(DisplayManager::class.java).registerDisplayListener(displayListener, ui)
         render.setDisplayRotation(displayDegrees())
         showLastTake(lastTakeUri)
-        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(Manifest.permission.CAMERA), 1)
-        } else openCamera()
+        val want = listOf(Manifest.permission.CAMERA, Manifest.permission.POST_NOTIFICATIONS)
+            .filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED && (it != Manifest.permission.POST_NOTIFICATIONS || Build.VERSION.SDK_INT >= 33) }
+        if (want.isNotEmpty()) requestPermissions(want.toTypedArray(), 1)
+        if (Manifest.permission.CAMERA !in want) openCamera()
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) openCamera()
+        val cam = permissions.indexOf(Manifest.permission.CAMERA)
+        if (cam < 0) return
+        if (grantResults.getOrNull(cam) == PackageManager.PERMISSION_GRANTED) openCamera()
         else Toast.makeText(this, "Camera permission is required", Toast.LENGTH_LONG).show()
     }
 
     override fun onPause() {
+        FinalizeService.visible = false
         if (takes.recording) stopTake()
         closePanel()
         camera.close()
