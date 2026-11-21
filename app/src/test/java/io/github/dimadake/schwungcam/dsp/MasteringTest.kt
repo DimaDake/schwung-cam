@@ -139,6 +139,18 @@ class MasteringTest {
         assertTrue(maxTruePeakDb(ol, or, ol.size) <= -1.0)
     }
 
+    // a 24 min take sat at "Saving 28%" for minutes when progress moved only between passes
+    @Test fun `progress moves within passes and never back`() {
+        val (l, r) = take(60, 0.05)
+        val seen = ArrayList<Float>()
+        Mastering.run(fs, MasterSettings(), { ArrayReader(l, r) }, { _, _, _ -> }, frames = l.size.toLong()) { seen.add(it) }
+        assertTrue("monotonic $seen", seen.zipWithNext().all { (a, b) -> b >= a })
+        assertEquals(1f, seen.last(), 0f)
+        val passes = 3 + Mastering.MAX_LIMIT_PASSES
+        val between = seen.count { kotlin.math.abs(it * passes - Math.round(it * passes)) > 1e-4 }
+        assertTrue("updates inside passes: $seen", between >= 10)
+    }
+
     @Test fun `mastering off passes samples through untouched`() {
         val (l, r) = take(2, 0.1)
         val (ol, or, _) = master(l, r, MasterSettings(enabled = false))

@@ -61,10 +61,15 @@ Needs JDK 17, the Android SDK (platform 34), NDK 27.2.12479018 and CMake 3.22.1
 
 ```bash
 ./gradlew testDebugUnitTest    # JVM tests: parser, sync, take, loudness, limiter, mastering
-./gradlew assembleDebug        # app/build/outputs/apk/debug/app-debug.apk
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+./gradlew assembleRelease      # app/build/outputs/apk/release/app-release.apk
+adb install -r app/build/outputs/apk/release/app-release.apk
 tools/build-probe.sh           # the stems core on this Mac: build-probe/stems_probe --channel "Movy Master"
 ```
+
+Install the release build for recording: a debuggable build runs the
+mastering DSP many times slower on ART, so a 20-minute take spends many
+minutes on "Saving". (`assembleDebug` is for the debugger; it also lets
+`adb shell run-as` reach a take's raw files in the app cache.)
 
 ## License
 

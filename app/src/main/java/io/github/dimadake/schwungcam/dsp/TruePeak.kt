@@ -17,28 +17,28 @@ import kotlin.math.sin
  * bound that is below [floor].
  */
 class TruePeak {
-    private val hist = DoubleArray(TAPS_PER_PHASE)
+    // each sample is written twice, so the newest TAPS_PER_PHASE always sit
+    // contiguous at [idx, idx + TAPS_PER_PHASE), oldest first
+    private val hist = DoubleArray(2 * TAPS_PER_PHASE)
     private var idx = 0
 
     fun process(x: Double, floor: Double = 0.0): Double {
         hist[idx] = x
-        idx = (idx + 1) % TAPS_PER_PHASE
+        hist[idx + TAPS_PER_PHASE] = x
+        idx = if (idx == TAPS_PER_PHASE - 1) 0 else idx + 1
         var histMax = 0.0
-        for (v in hist) if (abs(v) > histMax) histMax = abs(v)
+        for (t in idx until idx + TAPS_PER_PHASE) { val a = abs(hist[t]); if (a > histMax) histMax = a }
         // no interpolated point exceeds histMax·Σ|c|: skip the filter when that is safe
         val bound = histMax * MAX_ABS_SUM
         if (bound < floor) return bound
         var peak = abs(x)
         // the filter is even-length, so no phase lands on an input sample:
         // all of them are interpolated points between x[n-16] and x[n-15]
+        val h = hist; val base = idx
         for (p in 0 until PHASES) {
-            val c = COEF[p]
+            val c = REV[p]
             var acc = 0.0
-            var h = idx
-            for (t in 0 until TAPS_PER_PHASE) {
-                h = if (h == 0) TAPS_PER_PHASE - 1 else h - 1
-                acc += c[t] * hist[h]
-            }
+            for (t in 0 until TAPS_PER_PHASE) acc += c[t] * h[base + t]
             if (abs(acc) > peak) peak = abs(acc)
         }
         return peak
@@ -67,6 +67,9 @@ class TruePeak {
                 bank
             }
         }
+
+        /** [COEF] with each bank reversed, so the newest sample meets tap 0 at the end of a forward walk. */
+        private val REV: Array<DoubleArray> = Array(PHASES) { p -> COEF[p].reversedArray() }
 
         private const val KAISER_BETA = 8.0
 

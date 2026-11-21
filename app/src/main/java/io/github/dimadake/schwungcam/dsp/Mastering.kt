@@ -39,60 +39,70 @@ object Mastering {
         s: MasterSettings,
         open: () -> FrameReader,
         sink: FrameSink,
+        /** Frames [open] yields, if known: progress then also moves within a pass, not only between them. */
+        frames: Long = 0,
         progress: (Float) -> Unit = {},
     ): MasterReport {
         if (!s.enabled) {
-            pass(fs, open, null) { l, r, n -> sink.write(l, r, n) }
+            pass(fs, open, null, frames, progress) { l, r, n -> sink.write(l, r, n) }
             return MasterReport(Double.NaN, Double.NaN, 0.0, 1)
         }
         val totalPasses = 3 + MAX_LIMIT_PASSES
         var done = 0
         fun tick() { done++; progress(done.toFloat() / totalPasses) }
+        val within: (Float) -> Unit = { f -> progress((done + f) / totalPasses) }
+        fun measure(chain: Chain) = measure(fs, open, chain, frames, within)
 
-        val pre = measure(fs, open, Chain(fs, null, 1.0, null)); tick()
+        val pre = measure(Chain(fs, null, 1.0, null)); tick()
         if (pre == Double.NEGATIVE_INFINITY) {
-            pass(fs, open, Chain(fs, null, 1.0, null)) { l, r, n -> sink.write(l, r, n) }
+            pass(fs, open, Chain(fs, null, 1.0, null), frames, within) { l, r, n -> sink.write(l, r, n) }
             progress(1f)
             return MasterReport(pre, pre, 0.0, 2)
         }
         val thr = pre + GLUE_ABOVE_LUFS
         fun glue() = if (s.glue) Compressor(fs, thr) else null
-        val glued = if (s.glue) measure(fs, open, Chain(fs, glue(), 1.0, null)).also { tick() } else pre
+        val glued = if (s.glue) measure(Chain(fs, glue(), 1.0, null)).also { tick() } else pre
 
         var gainDb = (s.targetLufs - glued).coerceAtMost(MAX_GAIN_DB)
         var out = Double.NEGATIVE_INFINITY
         var passes = 0
         for (i in 0 until MAX_LIMIT_PASSES) {
-            out = measure(fs, open, Chain(fs, glue(), db(gainDb), Limiter(fs, s.ceilingDbtp))); tick()
+            out = measure(Chain(fs, glue(), db(gainDb), Limiter(fs, s.ceilingDbtp))); tick()
             passes++
             // the limiter only ever takes loudness away, so only an undershoot is retried
             val short = s.targetLufs - out
             if (short <= TOLERANCE_LU || gainDb >= MAX_GAIN_DB) break
             gainDb = (gainDb + short).coerceAtMost(MAX_GAIN_DB)
         }
+        // the passes the limiter loop skipped are not waited for: the final pass fills the rest of the bar
+        val last = done
         val chain = Chain(fs, glue(), db(gainDb), Limiter(fs, s.ceilingDbtp))
-        pass(fs, open, chain) { l, r, n -> sink.write(l, r, n) }
+        pass(fs, open, chain, frames, { f -> progress((last + f * (totalPasses - last)) / totalPasses) }) { l, r, n -> sink.write(l, r, n) }
         progress(1f)
         return MasterReport(pre, out, gainDb, passes)
     }
 
     private fun db(x: Double) = 10.0.pow(x / 20)
 
-    private fun measure(fs: Int, open: () -> FrameReader, chain: Chain): Double {
+    private fun measure(fs: Int, open: () -> FrameReader, chain: Chain, frames: Long, within: (Float) -> Unit): Double {
         val m = LoudnessMeter(fs)
-        pass(fs, open, chain) { l, r, n -> m.add(l, r, n) }
+        pass(fs, open, chain, frames, within) { l, r, n -> m.add(l, r, n) }
         return m.integrated()
     }
 
     /** Streams [open] through [chain] (null = untouched), keeping length and alignment. */
-    private fun pass(fs: Int, open: () -> FrameReader, chain: Chain?, out: FrameSink) {
+    private fun pass(fs: Int, open: () -> FrameReader, chain: Chain?, frames: Long, within: (Float) -> Unit, out: FrameSink) {
         val l = FloatArray(BLOCK); val r = FloatArray(BLOCK)
         val ol = FloatArray(BLOCK); val or = FloatArray(BLOCK)
         var toDrop = chain?.latency ?: 0
+        var read = 0L; var told = 0L
         open().use { rd ->
             while (true) {
                 val n = rd.read(l, r, BLOCK)
                 if (n <= 0) break
+                read += n
+                // about every 10 s of audio: often enough to watch, rare enough to be free
+                if (frames > 0 && read - told >= 10L * fs) { told = read; within(minOf(1f, read.toFloat() / frames)) }
                 if (chain == null) { out.write(l, r, n); continue }
                 val k = chain.process(l, r, n, ol, or, toDrop)
                 toDrop = maxOf(0, toDrop - n)
