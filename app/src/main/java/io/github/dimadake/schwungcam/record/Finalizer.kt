@@ -35,10 +35,10 @@ class Finalizer(private val resolver: ContentResolver, private val rate: Int = 4
     ): FinalResult {
         val videoFile = File(dir, "video.mp4")
         val wav = File(dir, "audio.wav")
-        val m4a = File(dir, "audio.m4a")
         var warning: String? = null
         var report: MasterReport? = null
         var timeline: Timeline? = null
+        var encoded: EncodedAudio? = null
 
         if (audio != null && audio.frames > 0) {
             val fromSec = audio.startPos.toDouble() / rate
@@ -80,9 +80,13 @@ class Finalizer(private val resolver: ContentResolver, private val rate: Int = 4
         if (audio != null && tl != null) {
             val (skip, len) = tl.audioRange(audio.startPos, video.lastPtsUs + FRAME_US)
             if (keepWav) saveWav(name, wav, skip, len)
-            val enc = AacEncoder(m4a, rate)
-            report = Mastering.run(rate, master, { RangeReader(wav, skip, len) }, enc, frames = len) { progress(it * 0.85f) }
-            enc.finish()
+            // every attempt but the last is dropped, and the last is kept
+            var attempt: ParallelAac? = null
+            var n = 0
+            report = Mastering.run(rate, master, { RangeReader(wav, skip, len) }, { ParallelAac(dir, n++, rate, len).also { attempt = it } }, frames = len) {
+                progress(it * MASTER_SHARE)
+            }
+            encoded = attempt!!.await { progress(MASTER_SHARE + it * ENCODE_SHARE) }
             val w = if (audio.endedEarly) "The Move restarted during the take; audio stops there."
                 else if (audio.gapFrames > rate / 10) "Audio had ${audio.gapFrames * 1000 / rate} ms of dropouts (filled with silence)." else null
             if (w != null) warning = listOfNotNull(warning, w).joinToString("\n\n")
@@ -90,7 +94,9 @@ class Finalizer(private val resolver: ContentResolver, private val rate: Int = 4
 
         val uri = insertVideo(name)
         resolver.openFileDescriptor(uri, "rw")!!.use { pfd ->
-            remux(videoFile, if (tl != null) m4a else null, tl, MediaMuxer(pfd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4))
+            remux(videoFile, encoded, tl, MediaMuxer(pfd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4), video.lastPtsUs) {
+                progress(MASTER_SHARE + ENCODE_SHARE + it * (1 - MASTER_SHARE - ENCODE_SHARE))
+            }
         }
         resolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
         progress(1f)
@@ -133,32 +139,43 @@ class Finalizer(private val resolver: ContentResolver, private val rate: Int = 4
         Log.w("SchwungCam", "rescue $display", e); false
     }
 
-    private fun remux(videoFile: File, audioFile: File?, tl: Timeline?, mux: MediaMuxer) {
+    /** The camera's frames placed on the audio clock, interleaved with the AAC frames by time. */
+    private fun remux(videoFile: File, audio: EncodedAudio?, tl: Timeline?, mux: MediaMuxer, lastPtsUs: Long, progress: (Float) -> Unit) {
         val vx = MediaExtractor().apply { setDataSource(videoFile.path) }
         vx.selectTrack(0)
         val vt = mux.addTrack(vx.getTrackFormat(0))
-        val ax = audioFile?.let { MediaExtractor().apply { setDataSource(it.path); selectTrack(0) } }
-        val at = ax?.let { mux.addTrack(it.getTrackFormat(0)) } ?: -1
+        val at = audio?.let { mux.addTrack(it.format) } ?: -1
         mux.start()
-        val buf = ByteBuffer.allocateDirect(8 shl 20)
+        val vbuf = ByteBuffer.allocateDirect(8 shl 20)
+        val abuf = ByteBuffer.allocateDirect(64 shl 10)
         val info = MediaCodec.BufferInfo()
-        var vDone = false
-        var aDone = ax == null
-        while (!vDone || !aDone) {
-            val vPts = if (vDone) Long.MAX_VALUE else (tl?.videoPtsUs(vx.sampleTime) ?: vx.sampleTime)
-            val aPts = if (aDone) Long.MAX_VALUE else ax!!.sampleTime
-            val useVideo = vPts <= aPts
-            val x = if (useVideo) vx else ax!!
-            info.size = x.readSampleData(buf, 0)
-            if (info.size < 0) { if (useVideo) vDone = true else aDone = true; continue }
-            info.offset = 0
-            info.presentationTimeUs = if (useVideo) vPts else aPts
-            info.flags = if (x.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
-            mux.writeSampleData(if (useVideo) vt else at, buf, info)
-            if (!x.advance()) { if (useVideo) vDone = true else aDone = true }
+        val ar = audio?.Reader()
+        try {
+            var aPts = ar?.next(abuf) ?: Long.MAX_VALUE
+            var vDone = false
+            var told = 0L
+            while (!vDone || aPts != Long.MAX_VALUE) {
+                val vPts = if (vDone) Long.MAX_VALUE else (tl?.videoPtsUs(vx.sampleTime) ?: vx.sampleTime)
+                if (vPts <= aPts) {
+                    info.size = vx.readSampleData(vbuf, 0)
+                    if (info.size < 0) { vDone = true; continue }
+                    info.offset = 0
+                    info.presentationTimeUs = vPts
+                    info.flags = if (vx.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
+                    mux.writeSampleData(vt, vbuf, info)
+                    if (vx.sampleTime - told >= 5_000_000 && lastPtsUs > 0) { told = vx.sampleTime; progress(minOf(1f, told.toFloat() / lastPtsUs)) }
+                    if (!vx.advance()) vDone = true
+                } else {
+                    info.set(0, abuf.limit(), aPts, MediaCodec.BUFFER_FLAG_KEY_FRAME)
+                    mux.writeSampleData(at, abuf, info)
+                    aPts = ar!!.next(abuf) ?: Long.MAX_VALUE
+                }
+            }
+        } finally {
+            ar?.close()
         }
         mux.stop(); mux.release()
-        vx.release(); ax?.release()
+        vx.release()
     }
 
     private fun insertVideo(name: String): Uri {
@@ -280,5 +297,10 @@ class Finalizer(private val resolver: ContentResolver, private val rate: Int = 4
         resolver.update(uri, ContentValues().apply { put(MediaStore.Audio.Media.IS_PENDING, 0) }, null, null)
     }
 
-    companion object { const val FRAME_US = 33_333L }
+    companion object {
+        const val FRAME_US = 33_333L
+        // of the bar: mastering, then the encoders' tail, then the remux, which copies the whole video
+        private const val MASTER_SHARE = 0.55f
+        private const val ENCODE_SHARE = 0.05f
+    }
 }

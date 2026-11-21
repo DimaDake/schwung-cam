@@ -22,7 +22,7 @@ class MasteringSpeedTest {
                 }
                 override fun close() {}
             }
-        }, { _, _, _ -> })
+        }, { object : MasterSink { override fun write(l: FloatArray, r: FloatArray, n: Int) {} } })
         val s = (System.nanoTime() - t0) / 1e9
         println("MASTERING 60 s of audio in %.2f s, %d limiter passes".format(s, rep.passes))
         assertTrue("took $s s", s < 15)

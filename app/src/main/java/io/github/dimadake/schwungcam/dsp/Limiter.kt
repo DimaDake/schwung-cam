@@ -15,7 +15,7 @@ import kotlin.math.pow
  */
 class Limiter(fs: Int, ceilingDbtp: Double = -1.0, lookaheadMs: Double = 5.0, releaseMs: Double = 80.0) {
     // under the ceiling by the detector's worst measured under-read (0.15 dB) plus slack
-    private val ceil = 10.0.pow((ceilingDbtp - 0.25) / 20)
+    internal val ceil = 10.0.pow((ceilingDbtp - 0.25) / 20)
     private val la = (fs * lookaheadMs / 1000).toInt()
     private val avgLen = la - TruePeak.DELAY
     private val winLen = la + 1
@@ -40,8 +40,11 @@ class Limiter(fs: Int, ceilingDbtp: Double = -1.0, lookaheadMs: Double = 5.0, re
     /** Latency in samples: output n is input n − [latency]. */
     val latency: Int get() = la
 
-    fun process(inL: Double, inR: Double, out: DoubleArray) {
-        val peak = maxOf(tpL.process(inL, ceil), tpR.process(inR, ceil))
+    fun process(inL: Double, inR: Double, out: DoubleArray) =
+        process(inL, inR, maxOf(tpL.process(inL, ceil), tpR.process(inR, ceil)), out)
+
+    /** [peak]: what [StereoPeaks] found for this sample, with [ceil] as its floor. */
+    fun process(inL: Double, inR: Double, peak: Double, out: DoubleArray) {
         val r = if (peak > ceil) ceil / peak else 1.0
 
         while (qSize > 0 && qVal[(qHead + qSize - 1) % qVal.size] >= r) qSize--

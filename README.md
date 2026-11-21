@@ -27,7 +27,8 @@ burned into the video, and the audio is mastered for YouTube after each take.
 - **Mastering** (after stop): 20 Hz high-pass → glue compressor (2:1) →
   loudness normalisation (BS.1770-4, **−14 LUFS** for YouTube, or −9) →
   20 kHz low-pass → 8× true-peak limiter at **−1 dBTP**. Output is AAC-LC
-  384 kbps (or the encoder's max) and H.264 High, in
+  384 kbps (or the encoder's max), encoded by up to four encoders side by
+  side on cuts they agree on to the bit, and H.264 High, in
   `Movies/SchwungCam/*.mp4`. You can also keep the raw WAV
   (`Music/SchwungCam`).
 - **AI timeline** (Settings, off by default): beside each take,
@@ -63,7 +64,8 @@ Needs JDK 17, the Android SDK (platform 34), NDK 27.2.12479018 and CMake 3.22.1
 ./gradlew testDebugUnitTest    # JVM tests: parser, sync, take, loudness, limiter, mastering
 ./gradlew assembleRelease      # app/build/outputs/apk/release/app-release.apk
 adb install -r app/build/outputs/apk/release/app-release.apk
-tools/build-probe.sh           # the stems core on this Mac: build-probe/stems_probe --channel "Movy Master"
+tools/build-probe.sh           # the stems core on this Mac: build-probe/stems_probe --channel "Movy Master";
+                               # also the native true-peak library, which NativePeaksTest then checks against Kotlin
 ```
 
 Install the release build for recording: a debuggable build runs the

@@ -113,12 +113,23 @@ class MasteringTest {
         return l to r
     }
 
+    /** An attempt that collects what it is given, and whether it was kept. */
+    private class Attempt(size: Int) : MasterSink {
+        val l = FloatArray(size); val r = FloatArray(size)
+        var w = 0; var kept = false; var dropped = false
+        override fun write(l: FloatArray, r: FloatArray, n: Int) { System.arraycopy(l, 0, this.l, w, n); System.arraycopy(r, 0, this.r, w, n); w += n }
+        override fun keep() { kept = true }
+        override fun drop() { dropped = true }
+    }
+
     private fun master(l: FloatArray, r: FloatArray, s: MasterSettings): Triple<FloatArray, FloatArray, MasterReport> {
-        val ol = FloatArray(l.size); val or = FloatArray(l.size)
-        var w = 0
-        val rep = Mastering.run(fs, s, { ArrayReader(l, r) }, { a, b, n -> System.arraycopy(a, 0, ol, w, n); System.arraycopy(b, 0, or, w, n); w += n })
-        assertEquals("length preserved", l.size, w)
-        return Triple(ol, or, rep)
+        val attempts = ArrayList<Attempt>()
+        val rep = Mastering.run(fs, s, { ArrayReader(l, r) }, { Attempt(l.size).also { attempts.add(it) } })
+        assertEquals("one attempt kept", 1, attempts.count { it.kept })
+        assertTrue("every attempt kept or dropped", attempts.all { it.kept != it.dropped })
+        val k = attempts.single { it.kept }
+        assertEquals("length preserved", l.size, k.w)
+        return Triple(k.l, k.r, rep)
     }
 
     @Test fun `quiet take is mastered to -14 LUFS under -1 dBTP`() {
@@ -143,12 +154,21 @@ class MasteringTest {
     @Test fun `progress moves within passes and never back`() {
         val (l, r) = take(60, 0.05)
         val seen = ArrayList<Float>()
-        Mastering.run(fs, MasterSettings(), { ArrayReader(l, r) }, { _, _, _ -> }, frames = l.size.toLong()) { seen.add(it) }
+        Mastering.run(fs, MasterSettings(), { ArrayReader(l, r) }, { object : MasterSink { override fun write(l: FloatArray, r: FloatArray, n: Int) {} } }, frames = l.size.toLong()) { seen.add(it) }
         assertTrue("monotonic $seen", seen.zipWithNext().all { (a, b) -> b >= a })
         assertEquals(1f, seen.last(), 0f)
-        val passes = 3 + Mastering.MAX_LIMIT_PASSES
-        val between = seen.count { kotlin.math.abs(it * passes - Math.round(it * passes)) > 1e-4 }
-        assertTrue("updates inside passes: $seen", between >= 10)
+        assertTrue("updates inside passes: $seen", seen.size >= 10)
+    }
+
+    // the limiter takes loudness from sharp hits, so the first pass falls short and its attempt is dropped
+    @Test fun `a short pass is dropped and the louder one kept`() {
+        val n = 12 * fs
+        val l = FloatArray(n) { i -> if (i % 4410 < 40) 0.9f * (if (i % 2 == 0) 1f else -1f) else (0.2 * sin(2 * PI * 220 * i / fs)).toFloat() }
+        val r = l.copyOf()
+        val (ol, or, rep) = master(l, r, MasterSettings(glue = false))
+        assertTrue("passes ${rep.passes}", rep.passes in 2 until Mastering.MAX_LIMIT_PASSES)
+        val m = LoudnessMeter(fs); m.add(ol, or, ol.size)
+        assertEquals("the kept attempt is the one measured", rep.outputLufs, m.integrated(), 0.01)
     }
 
     @Test fun `mastering off passes samples through untouched`() {

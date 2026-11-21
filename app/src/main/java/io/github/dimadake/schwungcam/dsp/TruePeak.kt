@@ -71,6 +71,9 @@ class TruePeak {
         /** [COEF] with each bank reversed, so the newest sample meets tap 0 at the end of a forward walk. */
         private val REV: Array<DoubleArray> = Array(PHASES) { p -> COEF[p].reversedArray() }
 
+        /** [REV] flat, bank after bank: what [NativePeaks] is built from, so both filters are one. */
+        internal val banks: DoubleArray get() = DoubleArray(PHASES * TAPS_PER_PHASE) { REV[it / TAPS_PER_PHASE][it % TAPS_PER_PHASE] }
+
         private const val KAISER_BETA = 8.0
 
         private fun besselI0(x: Double): Double {
@@ -79,6 +82,6 @@ class TruePeak {
             return sum
         }
 
-        private val MAX_ABS_SUM: Double = maxOf(1.0, COEF.maxOf { b -> b.sumOf { abs(it) } })
+        internal val MAX_ABS_SUM: Double = maxOf(1.0, COEF.maxOf { b -> b.sumOf { abs(it) } })
     }
 }

@@ -35,7 +35,14 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    testOptions { unitTests.isReturnDefaultValues = true }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+        // tools/build-probe.sh builds the native true-peak detector for this Mac; NativePeaksTest runs it when there
+        unitTests.all { t ->
+            val lib = rootProject.file("build-probe/libschwungcam_dsp.dylib")
+            if (lib.exists()) t.systemProperty("schwungcam.dsplib", lib.absolutePath)
+        }
+    }
 }
 
 dependencies {

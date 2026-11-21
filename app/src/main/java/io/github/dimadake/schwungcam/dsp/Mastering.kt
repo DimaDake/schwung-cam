@@ -22,6 +22,16 @@ fun interface FrameSink {
 }
 
 /**
+ * One attempt at the master. Each limiter pass writes to a new one, since
+ * only once the pass is over is it known to be on target: then it is kept,
+ * else dropped and the pass run again louder.
+ */
+interface MasterSink : FrameSink {
+    fun keep() {}
+    fun drop() {}
+}
+
+/**
  * The post-take mastering chain: DC/20 Hz high-pass → glue → gain → 20 kHz
  * low-pass → true-peak limiter, with the gain found by measuring. Every pass streams from [open],
  * so memory stays flat however long the take is.
@@ -33,53 +43,78 @@ object Mastering {
     const val TOLERANCE_LU = 0.5
     const val MAX_LIMIT_PASSES = 3
     const val GLUE_ABOVE_LUFS = 4.0
+    /** Of the bar, each loudness pass without the limiter: they cost a fraction of a limiter pass. */
+    private const val MEASURE_SHARE = 0.1f
 
     fun run(
         fs: Int,
         s: MasterSettings,
         open: () -> FrameReader,
-        sink: FrameSink,
+        sink: () -> MasterSink,
         /** Frames [open] yields, if known: progress then also moves within a pass, not only between them. */
         frames: Long = 0,
         progress: (Float) -> Unit = {},
     ): MasterReport {
         if (!s.enabled) {
-            pass(fs, open, null, frames, progress) { l, r, n -> sink.write(l, r, n) }
+            write(fs, open, null, frames, progress, sink)
             return MasterReport(Double.NaN, Double.NaN, 0.0, 1)
         }
-        val totalPasses = 3 + MAX_LIMIT_PASSES
-        var done = 0
-        fun tick() { done++; progress(done.toFloat() / totalPasses) }
-        val within: (Float) -> Unit = { f -> progress((done + f) / totalPasses) }
-        fun measure(chain: Chain) = measure(fs, open, chain, frames, within)
+        // how much of the bar is done, and the span the next pass may fill
+        var base = 0f
+        fun span(w: Float): (Float) -> Unit { val b = base; base += w; return { f -> progress(b + f * w) } }
+        fun measure(chain: Chain, w: Float) = measure(fs, open, chain, frames, span(w))
 
-        val pre = measure(Chain(fs, null, 1.0, null)); tick()
+        val pre = measure(Chain(fs, null, 1.0, null), MEASURE_SHARE)
         if (pre == Double.NEGATIVE_INFINITY) {
-            pass(fs, open, Chain(fs, null, 1.0, null), frames, within) { l, r, n -> sink.write(l, r, n) }
+            write(fs, open, Chain(fs, null, 1.0, null), frames, span(1f - base), sink)
             progress(1f)
             return MasterReport(pre, pre, 0.0, 2)
         }
         val thr = pre + GLUE_ABOVE_LUFS
         fun glue() = if (s.glue) Compressor(fs, thr) else null
-        val glued = if (s.glue) measure(Chain(fs, glue(), 1.0, null)).also { tick() } else pre
+        val glued = if (s.glue) measure(Chain(fs, glue(), 1.0, null), MEASURE_SHARE) else pre
 
         var gainDb = (s.targetLufs - glued).coerceAtMost(MAX_GAIN_DB)
         var out = Double.NEGATIVE_INFINITY
         var passes = 0
         for (i in 0 until MAX_LIMIT_PASSES) {
-            out = measure(Chain(fs, glue(), db(gainDb), Limiter(fs, s.ceilingDbtp))); tick()
+            val m = LoudnessMeter(fs)
+            val o = sink()
+            // most of what is left, as if this pass were the last, which it nearly always is
+            try {
+                pass(fs, open, Chain(fs, glue(), db(gainDb), Limiter(fs, s.ceilingDbtp)), frames, span((1f - base) * 0.95f)) { l, r, n ->
+                    m.add(l, r, n); o.write(l, r, n)
+                }
+            } catch (e: Throwable) {
+                o.drop(); throw e
+            }
+            out = m.integrated()
             passes++
             // the limiter only ever takes loudness away, so only an undershoot is retried
             val short = s.targetLufs - out
-            if (short <= TOLERANCE_LU || gainDb >= MAX_GAIN_DB) break
+            if (short <= TOLERANCE_LU || gainDb >= MAX_GAIN_DB) {
+                o.keep()
+                progress(1f)
+                return MasterReport(pre, out, gainDb, passes)
+            }
+            o.drop()
             gainDb = (gainDb + short).coerceAtMost(MAX_GAIN_DB)
         }
-        // the passes the limiter loop skipped are not waited for: the final pass fills the rest of the bar
-        val last = done
-        val chain = Chain(fs, glue(), db(gainDb), Limiter(fs, s.ceilingDbtp))
-        pass(fs, open, chain, frames, { f -> progress((last + f * (totalPasses - last)) / totalPasses) }) { l, r, n -> sink.write(l, r, n) }
+        // still short after every measured pass: one more at the corrected gain, unmeasured
+        write(fs, open, Chain(fs, glue(), db(gainDb), Limiter(fs, s.ceilingDbtp)), frames, span(1f - base), sink)
         progress(1f)
         return MasterReport(pre, out, gainDb, passes)
+    }
+
+    /** One pass into a new attempt that is kept. */
+    private fun write(fs: Int, open: () -> FrameReader, chain: Chain?, frames: Long, within: (Float) -> Unit, sink: () -> MasterSink) {
+        val o = sink()
+        try {
+            pass(fs, open, chain, frames, within) { l, r, n -> o.write(l, r, n) }
+        } catch (e: Throwable) {
+            o.drop(); throw e
+        }
+        o.keep()
     }
 
     private fun db(x: Double) = 10.0.pow(x / 20)
@@ -90,8 +125,12 @@ object Mastering {
         return m.integrated()
     }
 
-    /** Streams [open] through [chain] (null = untouched), keeping length and alignment. */
+    /** Streams [open] through [chain] (null = untouched), keeping length and alignment; closes [chain]. */
     private fun pass(fs: Int, open: () -> FrameReader, chain: Chain?, frames: Long, within: (Float) -> Unit, out: FrameSink) {
+        try { stream(fs, open, chain, frames, within, out) } finally { chain?.close() }
+    }
+
+    private fun stream(fs: Int, open: () -> FrameReader, chain: Chain?, frames: Long, within: (Float) -> Unit, out: FrameSink) {
         val l = FloatArray(BLOCK); val r = FloatArray(BLOCK)
         val ol = FloatArray(BLOCK); val or = FloatArray(BLOCK)
         var toDrop = chain?.latency ?: 0
@@ -123,31 +162,39 @@ object Mastering {
         }
     }
 
-    private class Chain(fs: Int, val comp: Compressor?, val gain: Double, val lim: Limiter?) {
+    private class Chain(fs: Int, val comp: Compressor?, val gain: Double, val lim: Limiter?) : AutoCloseable {
         private val hpL = Biquad.butterHighpass(fs.toDouble(), 20.0)
         private val hpR = hpL.copy()
         // 4th-order Butterworth at 20 kHz: inaudible, AAC drops it anyway, and it
         // keeps the content inside the band the true-peak detector reads accurately
         private val lpL = arrayOf(Biquad.butterLowpass(fs.toDouble(), 20000.0, 0.5412), Biquad.butterLowpass(fs.toDouble(), 20000.0, 1.3066))
         private val lpR = arrayOf(lpL[0].copy(), lpL[1].copy())
+        private val peaks = if (lim != null) StereoPeaks.create() else null
+        private val a = DoubleArray(BLOCK); private val b = DoubleArray(BLOCK); private val pk = DoubleArray(BLOCK)
         private val o = DoubleArray(2)
         val latency get() = lim?.latency ?: 0
 
-        /** Processes n frames; the first [drop] outputs are latency and are skipped. Returns frames written. */
+        /** Processes n ≤ [BLOCK] frames; the first [drop] outputs are latency and are skipped. Returns frames written. */
         fun process(l: FloatArray, r: FloatArray, n: Int, ol: FloatArray, or: FloatArray, drop: Int): Int {
+            for (i in 0 until n) {
+                var x = hpL.process(l[i].toDouble())
+                var y = hpR.process(r[i].toDouble())
+                if (comp != null) { val g = comp.gain(x, y); x *= g; y *= g }
+                x *= gain; y *= gain
+                if (lim != null) { x = lpL[1].process(lpL[0].process(x)); y = lpR[1].process(lpR[0].process(y)) }
+                a[i] = x; b[i] = y
+            }
+            // the limiter's input does not hang on its output: its peaks are found for the whole block first
+            if (lim != null) peaks!!.process(a, b, n, lim.ceil, pk)
             var w = 0
             for (i in 0 until n) {
-                var a = hpL.process(l[i].toDouble())
-                var b = hpR.process(r[i].toDouble())
-                if (comp != null) { val g = comp.gain(a, b); a *= g; b *= g }
-                a *= gain; b *= gain
-                if (lim != null) {
-                    a = lpL[1].process(lpL[0].process(a)); b = lpR[1].process(lpR[0].process(b))
-                    lim.process(a, b, o); a = o[0]; b = o[1]
-                }
-                if (i >= drop) { ol[w] = a.toFloat(); or[w] = b.toFloat(); w++ }
+                var x = a[i]; var y = b[i]
+                if (lim != null) { lim.process(x, y, pk[i], o); x = o[0]; y = o[1] }
+                if (i >= drop) { ol[w] = x.toFloat(); or[w] = y.toFloat(); w++ }
             }
             return w
         }
+
+        override fun close() { peaks?.close() }
     }
 }
