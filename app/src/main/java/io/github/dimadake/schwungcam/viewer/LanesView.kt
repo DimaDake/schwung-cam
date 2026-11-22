@@ -1,6 +1,7 @@
 package io.github.dimadake.schwungcam.viewer
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
@@ -16,6 +17,10 @@ import kotlin.math.abs
 class LanesView(ctx: Context) : View(ctx) {
     class Lane(val name: String, val color: Int, val stem: Int = -1) {
         var peaks: Peaks? = null
+        /** Still being read: [peaks] is what is there so far. */
+        var loading = true
+        /** Its reading has been started (a rebuild of the lanes must not start it twice). */
+        var queued = false
     }
 
     var lanes: List<Lane> = emptyList()
@@ -38,6 +43,9 @@ class LanesView(ctx: Context) : View(ctx) {
     private val nameW = ctx.dp(78).toFloat()
     private val btn = ctx.dp(26).toFloat()
     private val side = ctx.dp(12).toFloat()
+    // the overview changes only as its peaks arrive: drawn once into this, not every frame
+    private var overBmp: Bitmap? = null
+    private var overKey: Any? = null
 
     override fun onMeasure(w: Int, h: Int) {
         setMeasuredDimension(MeasureSpec.getSize(w), (overH + side + lanes.size * laneH + side).toInt())
@@ -52,7 +60,18 @@ class LanesView(ctx: Context) : View(ctx) {
         val over = lanes.firstOrNull()?.peaks
         r.set(side, 0f, width - side, overH)
         p.style = Paint.Style.FILL; p.color = C.SURFACE; c.drawRoundRect(r, 8f, 8f, p)
-        if (over != null) drawPeaks(c, over, 0.0, durationSec, side, width - side, 0f, overH, C.MUTED)
+        if (over != null) {
+            val key = Triple(over, width, durationSec)
+            if (key != overKey || overBmp == null) {
+                overKey = key
+                val bw = (width - 2 * side).toInt().coerceAtLeast(1)
+                val bmp = overBmp?.takeIf { it.width == bw && it.height == overH.toInt() } ?: Bitmap.createBitmap(bw, overH.toInt(), Bitmap.Config.ARGB_8888)
+                bmp.eraseColor(0)
+                drawPeaks(Canvas(bmp), over, 0.0, durationSec, 0f, bw.toFloat(), 0f, overH, C.MUTED)
+                overBmp = bmp
+            }
+            c.drawBitmap(overBmp!!, side, 0f, null)
+        }
         val px = side + ((t / durationSec).coerceIn(0.0, 1.0) * (width - 2 * side)).toFloat()
         p.color = C.ACCENT; p.strokeWidth = 2f; c.drawLine(px, 0f, px, overH, p)
 
@@ -66,10 +85,12 @@ class LanesView(ctx: Context) : View(ctx) {
             val name = TextFit.ellipsize(lane.name, p, nameW - side / 2)
             c.drawText(name, side, top + laneH / 2 + p.textSize * 0.35f, p)
             val pk = lane.peaks
-            if (pk == null) {
-                p.color = C.MUTED; c.drawText("Reading…", left + side, top + laneH / 2 + p.textSize * 0.35f, p)
-            } else {
-                drawPeaks(c, pk, from, to, left, right, top + 4, top + laneH - 4, if (audible) lane.color else 0xFF4A4B4F.toInt())
+            if (pk != null) drawPeaks(c, pk, from, to, left, right, top + 4, top + laneH - 4, if (audible) lane.color else 0xFF4A4B4F.toInt())
+            if (lane.loading) {
+                val pct = ((pk?.size ?: 0) * 100.0 / (durationSec * Peaks.PER_SEC)).toInt().coerceIn(0, 99)
+                p.color = C.MUTED; p.textAlign = Paint.Align.RIGHT
+                c.drawText("reading $pct %", right - side / 2, top + p.textSize, p)
+                p.textAlign = Paint.Align.LEFT
             }
             if (lane.stem >= 0) {
                 val bx = width - side - 2 * btn

@@ -39,6 +39,9 @@ class Peaks(val perSec: Int, val min: ByteArray, val max: ByteArray) {
             return Peaks(perSec, min.toByteArray(), max.toByteArray())
         }
 
+        /** What is there so far, for drawing while the rest is read. */
+        fun snapshot() = Peaks(perSec, min.toByteArray(), max.toByteArray())
+
         private fun q(v: Float) = (v.coerceIn(-1f, 1f) * 127).roundToInt()
     }
 

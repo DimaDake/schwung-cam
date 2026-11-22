@@ -8,6 +8,7 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
 import android.util.Log
 import java.io.File
 import java.io.FileInputStream
@@ -15,27 +16,55 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.channels.FileChannel
 
-/** Waveforms, worked out once per file and kept in the cache dir. */
+/**
+ * Waveforms. A master saved since the viewer came has its waveform from
+ * mastering ([saveMaster]); anything else is worked out once and kept in the
+ * cache dir, with [partial] called as it goes so the lane fills in.
+ */
 object PeakCache {
-    fun get(ctx: Context, row: MediaRow): Peaks? {
+    fun masterDir(ctx: Context) = File(ctx.filesDir, "peaks")
+
+    fun saveMaster(dir: File, take: String, p: Peaks) {
+        dir.mkdirs()
+        val f = File(dir, "$take.master.bin")
+        File(dir, f.name + ".tmp").also { t -> t.outputStream().buffered().use { p.write(it) }; t.renameTo(f) }
+    }
+
+    fun get(ctx: Context, row: MediaRow, partial: (Peaks) -> Unit = {}): Peaks? {
+        if (row.name.endsWith(".mp4") && !row.name.endsWith("_raw.mp4")) {
+            val m = File(masterDir(ctx), row.name.removeSuffix(".mp4") + ".master.bin")
+            if (m.exists()) m.inputStream().buffered().use { Peaks.read(it) }?.let { return it }
+        }
         val dir = File(ctx.cacheDir, "peaks").apply { mkdirs() }
-        val f = File(dir, row.id.substringAfterLast('/') + "_" + row.id.hashCode().toUInt() + "_" + row.size + ".bin")
+        val f = File(dir, row.id.substringAfterLast('/') + "_" + row.id.hashCode().toUInt() + "_" + row.size + "_v2.bin")
         if (f.exists()) f.inputStream().buffered().use { Peaks.read(it) }?.let { return it }
+        val t0 = SystemClock.elapsedRealtime()
         val p = try {
-            if (row.name.endsWith(".wav")) wav(ctx, row) else mp4(ctx, row)
+            if (row.name.endsWith(".wav")) wav(ctx, row, partial) else mp4(ctx, row, partial)
         } catch (e: Exception) {
             Log.w("SchwungCam", "peaks ${row.name}", e); null
         } ?: return null
+        Log.i("SchwungCam", "peaks ${row.name}: ${SystemClock.elapsedRealtime() - t0} ms")
         runCatching { File(dir, f.name + ".tmp").also { t -> t.outputStream().buffered().use { p.write(it) }; t.renameTo(f) } }
         return p
     }
 
-    private fun wav(ctx: Context, row: MediaRow): Peaks? {
+    /** Calls [partial] at most every [PARTIAL_MS]. */
+    private class Ticker(val b: Peaks.Builder, val partial: (Peaks) -> Unit) {
+        private var last = SystemClock.elapsedRealtime()
+        fun tick() {
+            val now = SystemClock.elapsedRealtime()
+            if (now - last >= PARTIAL_MS) { last = now; partial(b.snapshot()) }
+        }
+    }
+
+    private fun wav(ctx: Context, row: MediaRow, partial: (Peaks) -> Unit): Peaks? {
         ctx.contentResolver.openFileDescriptor(row.uri, "r")!!.use { pfd ->
             FileInputStream(pfd.fileDescriptor).channel.use { ch ->
                 val w = WavReader.info(ch) ?: return null
                 val b = Peaks.Builder(w.rate)
-                val frames = 16384
+                val tick = Ticker(b, partial)
+                val frames = 1 shl 16
                 val bytes = ByteArray(frames * w.frameBytes)
                 val st = FloatArray(frames * 2)
                 var pos = w.dataOffset
@@ -48,14 +77,19 @@ object PeakCache {
                     val nf = w.toStereo(bytes, n - n % w.frameBytes, st)
                     for (i in 0 until nf) b.add((st[2 * i] + st[2 * i + 1]) * 0.5f)
                     pos += n
+                    tick.tick()
                 }
                 return b.build()
             }
         }
     }
 
-    /** The video's own track, decoded to pcm. */
-    private fun mp4(ctx: Context, row: MediaRow): Peaks? {
+    /**
+     * The video's own track, decoded to pcm. The decoder works in another
+     * process on many small buffers: feed every free input and take every
+     * ready output without waiting, and wait (briefly) only when neither moved.
+     */
+    private fun mp4(ctx: Context, row: MediaRow, partial: (Peaks) -> Unit): Peaks? {
         val x = MediaExtractor()
         try {
             x.setDataSource(ctx, row.uri, null)
@@ -67,25 +101,33 @@ object PeakCache {
             val codec = MediaCodec.createDecoderByType(fmt.getString(MediaFormat.KEY_MIME)!!)
             codec.configure(fmt, null, null, 0); codec.start()
             val b = Peaks.Builder(rate)
+            val tick = Ticker(b, partial)
             val info = MediaCodec.BufferInfo()
             var inDone = false
             var float = false
             try {
                 while (true) {
-                    if (!inDone) {
-                        val i = codec.dequeueInputBuffer(10_000)
-                        if (i >= 0) {
-                            val n = x.readSampleData(codec.getInputBuffer(i)!!, 0)
-                            if (n < 0) { codec.queueInputBuffer(i, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM); inDone = true }
-                            else { codec.queueInputBuffer(i, 0, n, x.sampleTime, 0); x.advance() }
-                        }
+                    var moved = false
+                    while (!inDone) {
+                        val i = codec.dequeueInputBuffer(0)
+                        if (i < 0) break
+                        val n = x.readSampleData(codec.getInputBuffer(i)!!, 0)
+                        if (n < 0) { codec.queueInputBuffer(i, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM); inDone = true }
+                        else { codec.queueInputBuffer(i, 0, n, x.sampleTime, 0); x.advance() }
+                        moved = true
                     }
-                    val o = codec.dequeueOutputBuffer(info, 10_000)
-                    if (o == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                        val of = codec.outputFormat
-                        channels = of.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-                        float = of.containsKey(MediaFormat.KEY_PCM_ENCODING) && of.getInteger(MediaFormat.KEY_PCM_ENCODING) == AudioFormat.ENCODING_PCM_FLOAT
-                    } else if (o >= 0) {
+                    var eos = false
+                    while (true) {
+                        val o = codec.dequeueOutputBuffer(info, if (moved) 0 else WAIT_US)
+                        if (o == MediaCodec.INFO_TRY_AGAIN_LATER) break
+                        moved = true
+                        if (o == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                            val of = codec.outputFormat
+                            channels = of.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                            float = of.containsKey(MediaFormat.KEY_PCM_ENCODING) && of.getInteger(MediaFormat.KEY_PCM_ENCODING) == AudioFormat.ENCODING_PCM_FLOAT
+                            continue
+                        }
+                        if (o < 0) continue
                         val ob = codec.getOutputBuffer(o)!!.order(ByteOrder.LITTLE_ENDIAN)
                         ob.position(info.offset); ob.limit(info.offset + info.size)
                         if (float) {
@@ -96,8 +138,10 @@ object PeakCache {
                             while (sb.remaining() >= channels) { var s = 0f; repeat(channels) { s += sb.get() / 32768f }; b.add(s / channels) }
                         }
                         codec.releaseOutputBuffer(o, false)
-                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
+                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) { eos = true; break }
                     }
+                    if (eos) break
+                    tick.tick()
                 }
             } finally {
                 codec.stop(); codec.release()
@@ -107,6 +151,9 @@ object PeakCache {
             x.release()
         }
     }
+
+    private const val WAIT_US = 2_000L
+    private const val PARTIAL_MS = 400L
 }
 
 object WavReader {

@@ -157,7 +157,7 @@ class MainActivity : Activity() {
         stems = StemRecorder(openPort = { LinkNative.open() }, clockNs = { camera.clockNs() })
         LinkChannel.migratePicks(prefs.linkPicks).let { if (it != prefs.linkPicks) prefs.linkPicks = it }
         stems.picks = prefs.linkPicks
-        takes = TakeController(cacheDir, render, pcm, envelope, Finalizer(contentResolver), stems)
+        takes = TakeController(cacheDir, render, pcm, envelope, Finalizer(contentResolver, peaksDir = io.github.dimadake.schwungcam.viewer.PeakCache.masterDir(this)), stems)
         stream = MoveStream(
             host = { prefs.host },
             clockNs = { camera.clockNs() },

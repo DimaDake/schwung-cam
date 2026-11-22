@@ -23,7 +23,7 @@ import java.nio.ByteBuffer
 class FinalResult(val uri: Uri, val name: String, val report: MasterReport?, val warning: String?)
 
 /** After a take: fit the clocks, master, encode AAC, remux onto the audio clock, publish. */
-class Finalizer(private val resolver: ContentResolver, private val rate: Int = 44100) {
+class Finalizer(private val resolver: ContentResolver, private val rate: Int = 44100, private val peaksDir: File? = null) {
 
     fun run(
         dir: File, name: String,
@@ -87,6 +87,8 @@ class Finalizer(private val resolver: ContentResolver, private val rate: Int = 4
                 progress(it * MASTER_SHARE)
             }
             encoded = attempt!!.await { progress(MASTER_SHARE + it * ENCODE_SHARE) }
+            // a lost waveform only costs the viewer a decode
+            peaksDir?.let { d -> runCatching { io.github.dimadake.schwungcam.viewer.PeakCache.saveMaster(d, name, attempt!!.peaks.build()) } }
             val w = if (audio.endedEarly) "The Move restarted during the take; audio stops there."
                 else if (audio.gapFrames > rate / 10) "Audio had ${audio.gapFrames * 1000 / rate} ms of dropouts (filled with silence)." else null
             if (w != null) warning = listOfNotNull(warning, w).joinToString("\n\n")

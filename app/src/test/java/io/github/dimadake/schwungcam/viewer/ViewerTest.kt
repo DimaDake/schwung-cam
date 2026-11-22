@@ -137,6 +137,14 @@ class GesturesTest {
 }
 
 class AudioTest {
+    @Test fun snapshotIsWhatIsThereSoFar() {
+        val b = Peaks.Builder(44100)
+        repeat(44100 / 2) { b.add(0.25f) }
+        assertEquals(25, b.snapshot().size)
+        repeat(44100 / 2) { b.add(0.25f) }
+        assertEquals(50, b.build().size)
+    }
+
     @Test fun peaksOfASine() {
         val p = Peaks.Builder(44100).run {
             for (i in 0 until 44100) add((0.5 * sin(2 * PI * 100 * i / 44100)).toFloat())

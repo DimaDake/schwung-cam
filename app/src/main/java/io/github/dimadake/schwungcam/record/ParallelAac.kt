@@ -188,7 +188,13 @@ class ParallelAac(
         }
     }
 
-    override fun write(l: FloatArray, r: FloatArray, n: Int) = pcm.write(l, r, n)
+    /** The master's waveform, for the take viewer: made here it costs a min/max per frame, against decoding the AAC later. */
+    val peaks = io.github.dimadake.schwungcam.viewer.Peaks.Builder(rate)
+
+    override fun write(l: FloatArray, r: FloatArray, n: Int) {
+        for (i in 0 until n) peaks.add((l[i] + r[i]) * 0.5f)
+        pcm.write(l, r, n)
+    }
     override fun keep() = pcm.keep()
 
     override fun drop() {

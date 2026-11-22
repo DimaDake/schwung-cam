@@ -46,7 +46,7 @@ import java.util.zip.ZipInputStream
  * files (share or delete any of them). Fullscreen in either orientation.
  */
 class TakeActivity : ViewerActivity(), TextureView.SurfaceTextureListener {
-    private enum class Tab(val label: String) { GESTURES("Gestures"), AUDIO("Audio"), FILES("Files") }
+    private enum class Tab(val label: String) { AUDIO("Audio"), GESTURES("Gestures"), FILES("Files") }
     private enum class Source(val label: String) { MASTERED("Mastered"), RAW("Raw"), STEMS("Stems mix") }
 
     private lateinit var name: String
@@ -73,6 +73,8 @@ class TakeActivity : ViewerActivity(), TextureView.SurfaceTextureListener {
     private var solo = BooleanArray(0)
     private var mute = BooleanArray(0)
     private var lastDriftCheck = 0L
+    // waveforms: a few files at once, in lane order (the master first)
+    private val peakPool = java.util.concurrent.Executors.newFixedThreadPool(3)
 
     // views
     private lateinit var column: LinearLayout
@@ -139,6 +141,7 @@ class TakeActivity : ViewerActivity(), TextureView.SurfaceTextureListener {
 
     override fun onDestroy() {
         orientationWatch?.disable()
+        peakPool.shutdownNow()
         mix?.release(); mix = null
         mp?.release(); mp = null
         surface?.release()
@@ -243,7 +246,7 @@ class TakeActivity : ViewerActivity(), TextureView.SurfaceTextureListener {
             })
         }
         val filesPane = ScrollView(this).apply { tag = Tab.FILES; addView(files) }
-        panes.addView(gesturePane); panes.addView(audioPane); panes.addView(filesPane)
+        panes.addView(audioPane); panes.addView(gesturePane); panes.addView(filesPane)
 
         column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -476,7 +479,7 @@ class TakeActivity : ViewerActivity(), TextureView.SurfaceTextureListener {
     private fun buildTabs() {
         val t = take ?: return
         val shown = Tab.entries.filter { when (it) { Tab.GESTURES -> t.has(Kind.AI); Tab.AUDIO -> t.has(Kind.MASTERED) || t.has(Kind.RAW_AUDIO) || t.has(Kind.STEMS); Tab.FILES -> true } }
-        val want = runCatching { Tab.valueOf(getSharedPreferences("schwungcam", MODE_PRIVATE).getString("viewer_tab", "GESTURES")!!) }.getOrDefault(Tab.GESTURES)
+        val want = runCatching { Tab.valueOf(getSharedPreferences("schwungcam", MODE_PRIVATE).getString("viewer_tab", "AUDIO")!!) }.getOrDefault(Tab.AUDIO)
         tabStrip.removeAllViews()
         for (tb in shown) tabStrip.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; background = ripple()
@@ -525,15 +528,17 @@ class TakeActivity : ViewerActivity(), TextureView.SurfaceTextureListener {
         stems.forEachIndexed { i, r -> wanted += LanesView.Lane(r.name.removeSuffix(".wav"), C.of(Kind.STEMS), i) to r }
         // keep peaks already read
         val old = lanes.lanes.associateBy { it.name + it.stem }
-        lanes.lanes = wanted.map { (l, _) -> old[l.name + l.stem]?.takeIf { it.peaks != null } ?: l }
+        lanes.lanes = wanted.map { (l, _) -> old[l.name + l.stem] ?: l }
         lanes.durationSec = durationMs / 1000.0
-        val todo = wanted.mapIndexed { i, (_, r) -> lanes.lanes[i] to r }.filter { it.first.peaks == null }
-        if (todo.isNotEmpty()) Thread {
-            for ((lane, row) in todo) {
-                val p = PeakCache.get(this, row)
-                runOnUiThread { if (!isDestroyed) { lane.peaks = p ?: Peaks(Peaks.PER_SEC, ByteArray(0), ByteArray(0)); lanes.invalidate() } }
+        val todo = wanted.mapIndexed { i, (_, r) -> lanes.lanes[i] to r }.filter { it.first.loading && !it.first.queued }
+        todo.forEach { it.first.queued = true }
+        for ((lane, row) in todo) peakPool.execute {
+            val p = PeakCache.get(this, row) { part -> runOnUiThread { if (!isDestroyed && lane.loading) { lane.peaks = part; lanes.invalidate() } } }
+            runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
+                lane.peaks = p ?: Peaks(Peaks.PER_SEC, ByteArray(0), ByteArray(0)); lane.loading = false; lanes.invalidate()
             }
-        }.start()
+        }
     }
 
     private fun applySource() {
