@@ -47,6 +47,16 @@ burned into the video, and the audio is mastered for YouTube after each take.
   with, so Wi-Fi delay does not move them. Turn on LINK in movy's Settings.
   Design: `docs/superpowers/specs/2026-11-15-link-stems-design.md`.
 
+- **Takes** (the last-take thumbnail; long-press opens it in the gallery):
+  every take two to a row by day, with icons for what it has. A take plays
+  on one playhead with a drawn Move beside it (its screen, pads, knobs,
+  steps and lights from the AI timeline, plus the gesture list), waveforms
+  of the master, the raw WAV and each stem, which can play instead (stems
+  with solo/mute), and its files. Share any of them; trash a whole take,
+  some files, or by kind across takes (with Undo); "Free up space" drops
+  the raw files and stems. Fullscreen either way round. Design:
+  `docs/superpowers/specs/2026-11-22-take-viewer-design.md`.
+
 ## On the Move
 
 Audio flows only while Schwung's **Mirror Display** setting is on. The status
