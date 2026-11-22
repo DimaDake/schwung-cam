@@ -133,25 +133,38 @@ class LanesView(ctx: Context) : View(ctx) {
     }
 
     private var downX = 0f
+    private var downY = 0f
     private var downT = 0.0
     private var dragging = false
+    private var scrolledAway = false
+    private val slop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop
 
+    /**
+     * Sideways drags scrub; up and down belong to the page around. Nothing is
+     * claimed on touch-down, so the ScrollView still sees a vertical drag.
+     */
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                downX = e.x; downT = t; dragging = false
-                parent?.requestDisallowInterceptTouchEvent(true)
+                downX = e.x; downY = e.y; downT = t; dragging = false; scrolledAway = false
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
-                if (e.y > overH && (dragging || abs(e.x - downX) > context.dp(8))) {
-                    dragging = true
+                val dx = abs(e.x - downX); val dy = abs(e.y - downY)
+                if (!dragging && !scrolledAway) {
+                    if (dy > slop && dy > dx) scrolledAway = true
+                    else if (dx > slop && dx > dy && downY > overH) {
+                        dragging = true
+                        parent?.requestDisallowInterceptTouchEvent(true)
+                    }
+                }
+                if (dragging) {
                     val secPerPx = WINDOW / (waveRight() - waveLeft())
                     onSeek((downT - (e.x - downX) * secPerPx).coerceIn(0.0, durationSec))
                 }
             }
             MotionEvent.ACTION_UP -> {
-                if (!dragging) tap(e.x, e.y)
+                if (!dragging && !scrolledAway) tap(e.x, e.y)
                 parent?.requestDisallowInterceptTouchEvent(false)
             }
             MotionEvent.ACTION_CANCEL -> parent?.requestDisallowInterceptTouchEvent(false)
