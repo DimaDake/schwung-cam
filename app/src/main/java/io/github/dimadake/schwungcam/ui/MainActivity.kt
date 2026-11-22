@@ -65,6 +65,7 @@ import io.github.dimadake.schwungcam.stream.StreamState
 import io.github.dimadake.schwungcam.sync.ClockEnvelope
 import io.github.dimadake.schwungcam.sync.ScreenStamper
 import io.github.dimadake.schwungcam.sync.TickStamper
+import io.github.dimadake.schwungcam.viewer.TakesActivity
 
 class MainActivity : Activity() {
     private lateinit var prefs: Prefs
@@ -274,7 +275,8 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.status_chip).setOnClickListener { openPanel() }
         shutter.setOnClickListener { if (takes.recording) stopTake() else startTake() }
         flip.setOnClickListener { flipCamera() }
-        lastTake.setOnClickListener { lastTakeUri?.let(::openTake) }
+        lastTake.setOnClickListener { startActivity(Intent(this, TakesActivity::class.java)) }
+        lastTake.setOnLongClickListener { lastTakeUri?.let(::openTake); true }
         updateChrome()
     }
 
@@ -512,6 +514,7 @@ class MainActivity : Activity() {
         r.warning?.let { AlertDialog.Builder(this).setTitle("Take saved").setMessage(it).setPositiveButton(android.R.string.ok, null).show() }
     }
 
+    /** In the gallery (long-press on the thumbnail); a tap opens the app's own takes. */
     private fun openTake(uri: Uri) {
         try {
             startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "video/mp4").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
