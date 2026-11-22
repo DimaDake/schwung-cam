@@ -7,6 +7,9 @@ microphone. The audio comes over the same stream `http://move.local:7700/mirror`
 uses and is synced to the picture automatically. The Move's screen can be
 burned into the video, and the audio is mastered for YouTube after each take.
 
+**How to use it: [the manual](docs/MANUAL.md).** Download the APK from
+[Releases](https://github.com/DimaDake/schwung-cam/releases).
+
 ## Features
 
 - **Pixel Camera-style UI** in portrait and landscape: zoom chips, a
